@@ -1,0 +1,26 @@
+# Never include game/proprietary binaries or operational secrets
+*.apk
+*.aab
+*.obb
+*.so
+*.dll
+*.dylib
+*.pcap
+*.pcapng
+*.key
+*.pem
+*.p12
+*.jks
+accounts.json
+*.env
+.env*
+secrets/
+private-research/
+raw-captures/
+logs/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
