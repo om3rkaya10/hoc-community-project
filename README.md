@@ -49,7 +49,10 @@ not OSI open source. See [`NOTICE`](NOTICE).
 - [`PROTOCOL_REFERENCE.md`](PROTOCOL_REFERENCE.md) — sanitized observed state/message reference;
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — conceptual service layers;
 - [`COMPATIBILITY.md`](COMPATIBILITY.md) — Android/ABI/device notes;
-- [`PRESERVATION_METHOD.md`](PRESERVATION_METHOD.md) — evidence and clean-room workflow;
+- [`PRESERVATION_METHOD.md`](PRESERVATION_METHOD.md) — clean-room observation workflow;
+- [`REAL_CLIENT_VALIDATION.md`](REAL_CLIENT_VALIDATION.md) — real-client evidence levels and validation record;
+- [`TESTING.md`](TESTING.md) — deterministic test layers and release gates;
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contributor workflow and evidence requirements;
 - [`BETA_OPERATIONS.md`](BETA_OPERATIONS.md) — community testing and incident handling;
 - [`RELEASE.md`](RELEASE.md) — release, source package, client artifact, and rollback policy;
 - [`DISTRIBUTION.md`](DISTRIBUTION.md) — distribution channels, checksums, and package boundaries;

@@ -51,6 +51,9 @@ A release should document:
 - migration or rollback notes;
 - checksums for any separately distributed project-authored artifact.
 
+The repository's evidence and release gates are defined in [`TESTING.md`](TESTING.md), while historical
+and real-client claims are recorded in [`REAL_CLIENT_VALIDATION.md`](REAL_CLIENT_VALIDATION.md).
+
 The first server source release is planned as `server-v0.1.0`. Its Linux amd64 binary, release notes,
 and checksum manifest are generated locally for upload as release assets and are intentionally excluded
 from ordinary source commits.

@@ -12,3 +12,4 @@
 - Allowed non-commercial use, forks, modifications, free redistribution, and free community servers with attribution and same-license obligations.
 - Prohibited sale, paid access, paid hosting/SaaS, and other commercial use without written permission.
 - Added release and distribution policy separating the original Go server source from client APK/OBB/artifact distribution.
+- Added real-client validation records, evidence levels, testing guide, and contributor workflow.

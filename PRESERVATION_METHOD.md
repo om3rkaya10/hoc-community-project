@@ -33,3 +33,10 @@ The project records externally observable behavior and writes independent server
 - provider credentials or infrastructure access details.
 
 The private research archive may retain evidence locally under access control, but it must not be treated as a publication source.
+
+## Validation record
+
+Real-client validation is recorded separately in [`REAL_CLIENT_VALIDATION.md`](REAL_CLIENT_VALIDATION.md).
+It distinguishes deterministic tests, local client runs, WAN runs, and cross-geography public-beta runs.
+The distinction matters: a unit test is not a real-client claim, and a single public-beta route is not a
+global latency guarantee.
