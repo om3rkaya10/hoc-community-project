@@ -37,6 +37,9 @@ Example:
 server-v0.2.0
 ```
 
+The initial release uses `server-v0.1.0`. The release assets are the project-authored Linux amd64 server
+binary, `RELEASE_NOTES.md`, and `SHA256SUMS.txt`. The binary is not committed to the source tree.
+
 ## Server binary packages
 
 If project-authored server binaries are published, build from a clean tagged source commit. Name packages clearly, for example:
@@ -55,6 +58,11 @@ A binary package should contain only:
 - startup and health-check instructions.
 
 Do not include private keys, certificates, player/account data, production environment files, provider credentials, or live logs.
+
+The repository's tagged workflow also publishes a corresponding `linux/amd64` container image to
+`ghcr.io/om3rkaya10/hoc-community-project`. The image contains only the original Go server binary,
+license/notice files, and a non-secret runtime directory; operators must provide runtime configuration
+separately.
 
 ## Client package announcements
 

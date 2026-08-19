@@ -51,6 +51,10 @@ A release should document:
 - migration or rollback notes;
 - checksums for any separately distributed project-authored artifact.
 
+The first server source release is planned as `server-v0.1.0`. Its Linux amd64 binary, release notes,
+and checksum manifest are generated locally for upload as release assets and are intentionally excluded
+from ordinary source commits.
+
 ## Client artifact policy
 
 The client artifact is not part of the source tree. If a client package is distributed by the project, its release page must state:
@@ -78,6 +82,11 @@ A server source release may include the original Go source and tests under the H
 - real player logs.
 
 Operators must supply runtime configuration separately.
+
+The repository also contains a Dockerfile and a GitHub Actions workflow that build the original Go
+server from a tagged source commit and publish a Linux/amd64 container to GitHub Container Registry.
+The workflow runs the Go build, vet, and test gates before publishing. It never receives client APK/OBB
+files or production runtime secrets.
 
 ## Reproducibility
 
