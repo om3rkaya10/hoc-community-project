@@ -51,6 +51,8 @@ not OSI open source. See [`NOTICE`](NOTICE).
 - [`COMPATIBILITY.md`](COMPATIBILITY.md) — Android/ABI/device notes;
 - [`PRESERVATION_METHOD.md`](PRESERVATION_METHOD.md) — evidence and clean-room workflow;
 - [`BETA_OPERATIONS.md`](BETA_OPERATIONS.md) — community testing and incident handling;
+- [`RELEASE.md`](RELEASE.md) — release, source package, client artifact, and rollback policy;
+- [`DISTRIBUTION.md`](DISTRIBUTION.md) — distribution channels, checksums, and package boundaries;
 - [`CONTENT_POLICY.md`](CONTENT_POLICY.md) — IP/safety boundary for contributions;
 - [`SECURITY.md`](SECURITY.md) — secrets and responsible reporting;
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — attribution/disclaimer;

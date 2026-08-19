@@ -4,6 +4,9 @@
 
 The community server is a public beta, not a guaranteed production service. The goal is playability and evidence gathering, not perfect latency for every geography.
 
+See [`RELEASE.md`](RELEASE.md) and [`DISTRIBUTION.md`](DISTRIBUTION.md) for the source/client package boundary,
+checksum requirements, release tags, runtime-secret rules, and rollback procedure.
+
 ## Bug cadence
 
 Collect reports for approximately 15 days, classify them, then ship a small grouped fix set. Avoid emergency speculative changes to pinned wire behavior.
