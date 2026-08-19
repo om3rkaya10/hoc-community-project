@@ -63,8 +63,40 @@ Use one of:
 
 Never publish a guess as a protocol fact.
 
-## 7. Original server implementation
+## 7. Conceptual architecture
 
-The repository includes the original Go backend created by this community project. It is organized around independent account, edge, lobby, game-server, session, wire, and match-clock packages. The code is accompanied by unit/regression tests and contains no original client binary or copied Gameloft source.
+| Layer | Responsibility | Typical failure |
+|---|---|---|
+| Account/federation | identity, token, profile, device bootstrap | login loop, invalid profile |
+| Lobby/session | room create/join, membership, server advertisement | room not listed, join timeout |
+| Game server | seat state, hero choice, ready/load/start | stuck at seat or loading |
+| Match runtime | shared frame clock, actions, reconnect | movement feel, desync, disconnect |
 
-The server source is project property and is available under a non-commercial, attribution-required, same-license source-available grant. See `LICENSE`, `NOTICE`, `SERVER.md`, and `LICENSE_SERVER.md`.
+Boundary rules:
+
+1. Account success does not prove that the match server is reachable.
+2. A lobby room can exist while the game-server socket is dead.
+3. A healthy frame clock does not prove that a phone rendered every frame.
+4. A high RTT does not automatically mean the server is broken.
+5. A provider block can happen before the operating-system firewall sees a packet.
+
+```text
+LOGIN
+  └─> LOBBY_CONNECTED
+        ├─> ROOM_CREATED
+        ├─> ROOM_JOINED
+        └─> GAME_SERVER_CONNECTED
+                └─> SEAT_READY
+                        └─> MAP_LOADING
+                                └─> PLAYING
+                                        ├─> RECONNECT_HOLD
+                                        └─> COMPLETE
+```
+
+A report should include the last confirmed state and the first missing transition.
+
+## 8. Original server implementation
+
+The repository includes the independently written Go backend organized around account, edge, lobby, game-server, session, wire, and match-clock packages. It is accompanied by deterministic tests and contains no original client binary or copied Gameloft source.
+
+The server is project property and is available under the non-commercial, attribution-required, same-license terms in `LICENSE` and `NOTICE`. Development and testing instructions are consolidated in `DEVELOPMENT.md`.

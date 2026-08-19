@@ -1,131 +1,136 @@
-# Release and Package Policy
+# Release, Distribution, and Beta Operations
 
-## Purpose
+## Release posture
 
-This repository is the canonical source and documentation repository for the HOC Community Server project. It is not a repository for the original game client or original game data.
+The community server is a public beta: the goal is playable interoperability and evidence gathering, not perfect latency or universal device support.
 
-## What belongs in this repository
-
-The following may be committed when they comply with `LICENSE`, `NOTICE`, and `CONTENT_POLICY.md`:
-
-- original Go server source and tests;
-- original documentation and diagrams;
-- redacted protocol/state references;
-- build instructions and reproducibility notes;
-- source checksums and text manifests;
-- changelogs and incident notes with secrets and personal data removed.
-
-## What does not belong in this repository
-
-Do not commit or attach to normal source commits:
-
-- original or modified APK/IPA/OBB files;
-- native libraries, extracted assets, game tables, scripts, maps, textures, audio, or video;
-- decompiled client code or binary patch artifacts;
-- raw Frida scripts, memory dumps, absolute patch addresses, or raw PCAPs;
-- production certificates, private keys, account stores, passwords, tokens, provider details, or unredacted logs;
-- user-submitted screenshots containing personal data or credentials.
-
-The source repository and any client artifact distribution are separate release surfaces.
+See `VALIDATION.md` for evidence levels and `DEVELOPMENT.md` for build/test gates.
 
 ## Versioning
 
-Use a human-readable release identifier:
+Use server tags in this form:
 
 ```text
-Global Public Beta 0.1
+server-vMAJOR.MINOR.PATCH
 ```
 
-For future server source releases, use a repository tag such as:
+The current releases are `server-v0.1.0` and `server-v0.1.1`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
 
-```text
-server-v0.2.0
-```
+## Distribution channels
 
-A release should document:
+| Material | Channel |
+|---|---|
+| Handbook and Go source | This GitHub repository |
+| Source release | GitHub tag / GitHub Release |
+| Server binary | Optional GitHub Release asset |
+| Container | `ghcr.io/om3rkaya10/hoc-community-project` |
+| Client APK | Separate project-controlled location |
+| OBB/original game data | Not distributed here |
+| Runtime secrets/config | Never public |
 
-- release date;
-- source commit;
-- server compatibility expectations;
-- known issues;
-- migration or rollback notes;
-- checksums for any separately distributed project-authored artifact.
+The source tree must not contain APK/IPA/OBB, native libraries, extracted assets, game tables, scripts, decompiled client code, raw Frida scripts, memory dumps, raw PCAPs, credentials, certificates, account stores, or unredacted logs.
 
-The repository's evidence and release gates are defined in [`TESTING.md`](TESTING.md), while historical
-and real-client claims are recorded in [`REAL_CLIENT_VALIDATION.md`](REAL_CLIENT_VALIDATION.md).
+## Server packages
 
-The first server source release is planned as `server-v0.1.0`. Its Linux amd64 binary, release notes,
-and checksum manifest are generated locally for upload as release assets and are intentionally excluded
-from ordinary source commits.
+A binary package may contain only the compiled Go server, `LICENSE`, `NOTICE`, a non-secret configuration example, SHA-256 manifest, and startup/health instructions. Runtime certificates, account storage, environment files, provider details, and live logs are supplied separately.
 
-## Client artifact policy
-
-The client artifact is not part of the source tree. If a client package is distributed by the project, its release page must state:
-
-- exact file name and version;
-- SHA-256 checksum;
-- supported ABI/device profile;
-- installation notes;
-- known compatibility issues;
-- whether the file contains or depends on third-party material;
-- an unofficial-project disclaimer;
-- a clear route for reporting a disputed or unavailable file.
-
-Do not describe a client artifact as an official Gameloft release. Do not bundle original OBB/data files in this repository.
-
-## Server package policy
-
-A server source release may include the original Go source and tests under the HOC Community Server Community Source License. A runnable server package must never include:
-
-- `accounts.json`;
-- `.env` files;
-- TLS private keys;
-- production host/IP configuration;
-- live access tokens;
-- real player logs.
-
-Operators must supply runtime configuration separately.
-
-The repository also contains a Dockerfile and a GitHub Actions workflow that build the original Go
-server from a tagged source commit and publish a Linux/amd64 container to GitHub Container Registry.
-The workflow runs the Go build, vet, and test gates before publishing. It never receives client APK/OBB
-files or production runtime secrets.
-
-## Reproducibility
-
-Before tagging a server release:
+The tagged GitHub Actions workflow runs:
 
 ```text
 go build ./...
 go vet ./...
 go test ./... -count=1
-git diff --check
 ```
 
-Record the source commit and verify that the working tree contains no runtime secrets or generated binaries.
+before publishing the Linux/amd64 GHCR image. The image contains only the original Go server binary, license/notice files, and an empty non-secret runtime directory.
 
-## Rollback
+## Client artifact policy
 
-Keep the previous known-good server commit and runtime configuration outside the repository's public tree. If a release regresses:
+Client artifacts are not part of the source tree. Any client announcement must state exact file/version, SHA-256, ABI/device profile, installation notes, known issues, account-login requirements, password/privacy warnings, bug-report route, and unofficial-project status. It must not imply an official Gameloft release or bundle original OBB/data files here.
 
-1. announce maintenance or rollback status;
+## Checksums
+
+Provide SHA-256 for every downloadable package:
+
+```text
+Windows: Get-FileHash -Algorithm SHA256 .\package.zip
+Linux:   sha256sum package.zip
+macOS:   shasum -a 256 package.zip
+```
+
+## Public-beta operations
+
+Collect bug reports for approximately 15 days, classify them, then ship small grouped fixes. Avoid emergency speculative changes to pinned wire behavior.
+
+Ask for country/ISP, Wi-Fi or mobile data, device/Android version, local time/timezone, last visible lifecycle state, reproduction steps, and safe screenshots/video. Never request passwords, tokens, private logs, device identifiers, or personal data.
+
+Normal beta username/password login is the canonical path. Guest/device identities may reach the lobby but are not the canonical custom-room ready path.
+
+## Rollback and migration
+
+Keep a known-good server commit, binary, and runtime configuration outside the public tree. If a release regresses:
+
+1. announce maintenance or rollback;
 2. stop or drain the affected service;
-3. restore the known-good server artifact/configuration;
+3. restore the known-good artifact/configuration;
 4. verify health endpoints and listeners;
-5. record the incident without publishing secrets or personal data.
+5. record the incident without secrets or personal data.
 
-The hostname/DNS layer should be preferred for infrastructure migration so a new client build is not required merely because the server moves.
+Prefer hostname/DNS migration so an infrastructure move does not require a new client build.
 
-## Attribution and license
+## Free community use
 
-Every source or binary redistribution of the original project-authored server material must retain `LICENSE` and `NOTICE`, include the required attribution, identify substantial modifications, and remain within the non-commercial terms of the HOC Community Server Community Source License.
+The license permits free non-commercial community operation with attribution. A fork or operator may not charge for access, sell builds, or offer paid hosting/SaaS without separate written permission. Donations and transparent infrastructure cost sharing are permitted only under the exact conditions in `LICENSE`; payment may not buy access, priority, features, ranks, or gameplay advantages.
 
-Commercial sale, paid access, paid hosting/SaaS, or monetized redistribution requires separate written permission from the project owner.
+## Disputed artifacts
 
-## Published-as-is responsibility
+Remove disputed material from active distribution while it is reviewed. Keep neutral documentation separate from the disputed binary and restore an artifact only after a documented basis for inclusion and any required rights or permissions have been established.
+
+## Responsibility
 
 This project is published as-is. Each contributor, redistributor, operator, and user remains solely responsible for evaluating and complying with the laws, regulations, licenses, and third-party rights applicable in their own jurisdiction.
 
+## References
+
+- `LICENSE` / `NOTICE` — ownership and source-available terms
+- `GOVERNANCE.md` — content, security, and third-party boundaries
+- `DEVELOPMENT.md` — server development, testing, and contribution
+- `VALIDATION.md` — preservation and real-client evidence
+- `COMPATIBILITY.md` — Android/device notes
+
+## Current links
+
+- Repository: https://github.com/om3rkaya10/hoc-community-project
+- Latest server release: `server-v0.1.1`
+- Container: `ghcr.io/om3rkaya10/hoc-community-project`
+
+## Documentation-only note
+
+This policy consolidation does not change Go code, wire behavior, persistence, shutdown behavior, or deployment configuration. No live client run is required for this change.
+
+## Release checklist
+
+```text
+[ ] Record source commit/tag
+[ ] Run build/vet/test
+[ ] Verify checksum
+[ ] Exclude secrets and third-party client data
+[ ] Include LICENSE/NOTICE
+[ ] Keep rollback artifact
+[ ] Label real-client evidence correctly
+```
+
+## Package naming examples
+
+```text
+hoc-community-server_server-v0.2.0_linux_amd64.zip
+ghcr.io/om3rkaya10/hoc-community-project:server-v0.2.0
+```
+
+## Current baseline
+
+Live client testing is required only when a change affects client-visible behavior or when a new LIVE claim is made. Documentation-only changes do not require Nox, phone, or VPS testing.
+
 ## Status
 
-The repository may be public while client artifact distribution remains a separate operational decision. Publishing source does not grant rights to third-party client files, assets, trademarks, or original game data.
+This document consolidates the former release, distribution, and beta-operations guidance.

@@ -21,7 +21,7 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 
 **Public source-available community repository.** The canonical repository is
 [`om3rkaya10/hoc-community-project`](https://github.com/om3rkaya10/hoc-community-project).
-All published material must comply with [`CONTENT_POLICY.md`](CONTENT_POLICY.md).
+All published material must comply with [`GOVERNANCE.md`](GOVERNANCE.md).
 
 ## License
 
@@ -44,24 +44,15 @@ not OSI open source. See [`NOTICE`](NOTICE).
 
 ## Contents
 
-- [`HANDBOOK.md`](HANDBOOK.md) — main technical and historical guide;
-- [`SERVER.md`](SERVER.md) — original Go server ownership, architecture, and build guide;
-- [`PROTOCOL_REFERENCE.md`](PROTOCOL_REFERENCE.md) — sanitized observed state/message reference;
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — conceptual service layers;
-- [`COMPATIBILITY.md`](COMPATIBILITY.md) — Android/ABI/device notes;
-- [`PRESERVATION_METHOD.md`](PRESERVATION_METHOD.md) — clean-room observation workflow;
-- [`REAL_CLIENT_VALIDATION.md`](REAL_CLIENT_VALIDATION.md) — real-client evidence levels and validation record;
-- [`TESTING.md`](TESTING.md) — deterministic test layers and release gates;
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — contributor workflow and evidence requirements;
-- [`BETA_OPERATIONS.md`](BETA_OPERATIONS.md) — community testing and incident handling;
-- [`RELEASE.md`](RELEASE.md) — release, source package, client artifact, and rollback policy;
-- [`DISTRIBUTION.md`](DISTRIBUTION.md) — distribution channels, checksums, and package boundaries;
-- [`CONTENT_POLICY.md`](CONTENT_POLICY.md) — IP/safety boundary for contributions;
-- [`SECURITY.md`](SECURITY.md) — secrets and responsible reporting;
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — attribution/disclaimer;
-- [`CHANGELOG.md`](CHANGELOG.md) — handbook history.
-- [`LICENSE`](LICENSE) — detailed community source license;
-- [`NOTICE`](NOTICE) — ownership, attribution, and repository identity;
+- [`HANDBOOK.md`](HANDBOOK.md) — project history, principles, architecture, and server overview;
+- [`PROTOCOL_REFERENCE.md`](PROTOCOL_REFERENCE.md) — sanitized observed message/state reference;
+- [`COMPATIBILITY.md`](COMPATIBILITY.md) — Android ABI and device compatibility;
+- [`VALIDATION.md`](VALIDATION.md) — preservation method and real-client evidence;
+- [`DEVELOPMENT.md`](DEVELOPMENT.md) — Go server architecture, testing, and contributing;
+- [`RELEASE.md`](RELEASE.md) — releases, packages, distribution, beta operations, and rollback;
+- [`GOVERNANCE.md`](GOVERNANCE.md) — content, security, licensing, and third-party boundaries;
+- [`CHANGELOG.md`](CHANGELOG.md) — repository history;
+- [`LICENSE`](LICENSE) / [`NOTICE`](NOTICE) — complete terms and attribution;
 - [`server/hoc-server/`](server/hoc-server/) — independently written Go backend and tests.
 
 ## Responsibility and legal status
