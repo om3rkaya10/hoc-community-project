@@ -18,6 +18,11 @@ secrets/
 private-research/
 raw-captures/
 logs/
+server/hoc-server/bin/
+server/hoc-server/accounts.json
+server/hoc-server/*.env
+server/hoc-server/*.key
+server/hoc-server/*.crt
 
 # OS/editor
 .DS_Store

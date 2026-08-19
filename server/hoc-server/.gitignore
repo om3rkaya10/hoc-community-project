@@ -1,0 +1,7 @@
+bin/
+*.exe
+*.test
+accounts.json
+*.env
+server.key
+server.crt

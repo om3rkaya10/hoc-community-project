@@ -2,7 +2,7 @@
 
 An unofficial preservation, compatibility, and community-maintenance handbook for **Heroes of Order & Chaos** Android.
 
-> This repository is intentionally documentation-first. It does not distribute the original game APK, OBB/data files, native libraries, extracted assets, proprietary source code, credentials, server access tokens, or raw reverse-engineering dumps.
+> This repository contains original documentation and the project's independently written Go community server. It does not distribute the original game APK, OBB/data files, native libraries, extracted assets, Gameloft source code, credentials, server access tokens, or raw reverse-engineering dumps.
 
 ## Purpose
 
@@ -34,6 +34,8 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 ## Contents
 
 - [`HANDBOOK.md`](HANDBOOK.md) — main technical and historical guide;
+- [`SERVER.md`](SERVER.md) — original Go server ownership, architecture, and build guide;
+- [`PROTOCOL_REFERENCE.md`](PROTOCOL_REFERENCE.md) — sanitized observed state/message reference;
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — conceptual service layers;
 - [`COMPATIBILITY.md`](COMPATIBILITY.md) — Android/ABI/device notes;
 - [`PRESERVATION_METHOD.md`](PRESERVATION_METHOD.md) — evidence and clean-room workflow;
@@ -42,7 +44,8 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 - [`SECURITY.md`](SECURITY.md) — secrets and responsible reporting;
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — attribution/disclaimer;
 - [`CHANGELOG.md`](CHANGELOG.md) — handbook history.
+- [`server/hoc-server/`](server/hoc-server/) — independently written Go backend and tests.
 
 ## Legal note
 
-This is a documentation and preservation project, not legal advice. Copyright, trademark, reverse-engineering, interoperability, and distribution rules vary by jurisdiction. Obtain professional legal advice before publishing or distributing anything beyond original documentation.
+This is a preservation/interoperability project, not legal advice. The Go server is original project property; the original client, assets, and Gameloft marks are not. Copyright, trademark, reverse-engineering, interoperability, and distribution rules vary by jurisdiction. Obtain professional legal advice before public publication.

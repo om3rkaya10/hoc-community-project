@@ -6,7 +6,8 @@ Keep this repository useful as a preservation handbook without redistributing ma
 
 ## Allowed by default
 
-- Original prose written for this repository;
+- original prose written for this repository;
+- original Go server source, tests, packet builders, and operational abstractions authored by the project;
 - generic diagrams created by contributors;
 - high-level descriptions of observed client behavior;
 - interoperability concepts and protocol state-machine descriptions without copied payload dumps;
@@ -26,7 +27,7 @@ Keep this repository useful as a preservation handbook without redistributing ma
 
 ## Review rule
 
-When unsure, leave the material out and record a short abstract observation instead. A private GitHub repository is not automatically safe to publish later.
+Technical message identifiers and independently implemented field/state descriptions are allowed when they are necessary to explain interoperability. Gameloft binary code, assets, decompiled functions, patch bytes, or extracted tables are not. A private GitHub repository is not automatically safe to publish later.
 
 ## Takedown/contact
 

@@ -62,3 +62,9 @@ Use one of:
 - **Parked** — intentionally not pursued.
 
 Never publish a guess as a protocol fact.
+
+## 7. Original server implementation
+
+The repository includes the original Go backend created by this community project. It is organized around independent account, edge, lobby, game-server, session, wire, and match-clock packages. The code is accompanied by unit/regression tests and contains no original client binary or copied Gameloft source.
+
+The server source is project property and currently has no open-source grant. See `SERVER.md` and `LICENSE_SERVER.md`.
