@@ -19,7 +19,10 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 
 ## Repository status
 
-**Private archive candidate — not published yet.** Before any public release, every document must pass the content policy in [`CONTENT_POLICY.md`](CONTENT_POLICY.md).
+**Private GitHub archive.** The canonical repository is
+[`om3rkaya10/hoc-community-project`](https://github.com/om3rkaya10/hoc-community-project).
+Before any future public release, every document must pass the content policy in
+[`CONTENT_POLICY.md`](CONTENT_POLICY.md) and the project should obtain professional legal review.
 
 ## License
 
