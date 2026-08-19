@@ -38,4 +38,6 @@ the repository license unless a separate written contributor agreement applies.
 
 ## Takedown/contact
 
-Remove a disputed file first, preserve only a neutral factual summary, and seek legal advice before restoring it.
+Remove disputed material from distribution while it is reviewed, preserve only a neutral factual
+summary when appropriate, and restore the material only after the project has established a documented
+basis for its inclusion and any applicable rights or permissions.

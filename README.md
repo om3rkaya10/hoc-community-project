@@ -19,10 +19,9 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 
 ## Repository status
 
-**Private GitHub archive.** The canonical repository is
+**Public source-available community repository.** The canonical repository is
 [`om3rkaya10/hoc-community-project`](https://github.com/om3rkaya10/hoc-community-project).
-Before any future public release, every document must pass the content policy in
-[`CONTENT_POLICY.md`](CONTENT_POLICY.md) and the project should obtain professional legal review.
+All published material must comply with [`CONTENT_POLICY.md`](CONTENT_POLICY.md).
 
 ## License
 
@@ -60,6 +59,9 @@ not OSI open source. See [`NOTICE`](NOTICE).
 - [`NOTICE`](NOTICE) — ownership, attribution, and repository identity;
 - [`server/hoc-server/`](server/hoc-server/) — independently written Go backend and tests.
 
-## Legal note
+## Responsibility and legal status
 
-This is a preservation/interoperability project, not legal advice. The Go server is original project property; the original client, assets, and Gameloft marks are not. Copyright, trademark, reverse-engineering, interoperability, and distribution rules vary by jurisdiction. Obtain professional legal advice before public publication.
+The Go server and original project documentation are project-authored materials; the original client,
+assets, and Gameloft names and marks are not. This project is published as-is. Each contributor,
+redistributor, operator, and user remains solely responsible for evaluating and complying with the
+laws, regulations, licenses, and third-party rights applicable in their own jurisdiction.
