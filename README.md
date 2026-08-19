@@ -21,6 +21,15 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 
 **Private archive candidate — not published yet.** Before any public release, every document must pass the content policy in [`CONTENT_POLICY.md`](CONTENT_POLICY.md).
 
+## License
+
+The original project-authored materials, including the Go server, are available under the
+[`HOC Community Server Community Source License 1.0`](LICENSE): free non-commercial use,
+forking, modification, redistribution, and free community-server operation are allowed;
+attribution and same-license sharing are required; sale, paid access, paid hosting/SaaS,
+and other commercial use require separate written permission. This is source-available,
+not OSI open source. See [`NOTICE`](NOTICE).
+
 ## What is deliberately excluded
 
 - Original APK/OBB/assets/native libraries;
@@ -44,6 +53,8 @@ It is not an official Gameloft repository and is not affiliated with, endorsed b
 - [`SECURITY.md`](SECURITY.md) — secrets and responsible reporting;
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — attribution/disclaimer;
 - [`CHANGELOG.md`](CHANGELOG.md) — handbook history.
+- [`LICENSE`](LICENSE) — detailed community source license;
+- [`NOTICE`](NOTICE) — ownership, attribution, and repository identity;
 - [`server/hoc-server/`](server/hoc-server/) — independently written Go backend and tests.
 
 ## Legal note

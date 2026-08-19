@@ -1,9 +1,11 @@
-# Server Source — No License Granted Yet
+# Server Licensing
 
-Copyright (c) 2026 the HOC Community Server project contributors.
+The original Go server source under [`server/hoc-server/`](server/hoc-server/) is licensed under the project-drafted **HOC Community Server Community Source License, Version 1.0**.
 
-The original Go server implementation under `server/hoc-server/` is project-owned source. All rights are reserved unless a separate license is added by the copyright holders.
+Read the complete terms in [`LICENSE`](LICENSE) and the ownership/attribution details in [`NOTICE`](NOTICE).
 
-You may inspect the source inside this private archive. You may not copy, redistribute, sublicense, sell, host as a service, or publish derivative builds from the server source without explicit written permission from the project owners.
+The license allows free personal, educational, preservation, research, testing, and non-commercial community use, including forks and modifications, provided that attribution and the same license are preserved.
 
-This notice applies only to original project source. It does not grant rights to Heroes of Order & Chaos, Gameloft marks, the original client, assets, or any third-party material.
+It does not allow selling the server, selling a substantial derivative, charging for access, paid hosting/SaaS, or other Commercial Use without separate written permission from the project owner.
+
+This is a source-available license, not an OSI open-source license. It is a project-drafted document and is not legal advice.

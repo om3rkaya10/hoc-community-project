@@ -1,0 +1,321 @@
+HOC COMMUNITY SERVER COMMUNITY SOURCE LICENSE
+Version 1.0 — 2026-08-19
+
+Copyright (c) 2026 Ömer and the HOC Community Server contributors.
+
+IMPORTANT: THIS IS A SOURCE-AVAILABLE LICENSE, NOT AN OPEN-SOURCE LICENSE.
+Commercial use is restricted. Read all terms before using the Licensed Materials.
+
+1. DEFINITIONS
+
+1.1. "License" means this HOC Community Server Community Source License,
+Version 1.0.
+
+1.2. "Licensor" means the copyright holder identified as the project owner in
+the NOTICE file distributed with the Licensed Materials, together with any
+other contributor who owns copyright in a contribution and has submitted that
+contribution under this License.
+
+1.3. "Licensed Materials" means the original source code, tests, packet
+builders, documentation, diagrams, build files, and other original project
+materials distributed with this License. Licensed Materials do not include any
+Excluded Third-Party Materials described in Section 11.
+
+1.4. "You" means the individual or legal entity exercising permissions under
+this License.
+
+1.5. "Modification" means any change, adaptation, translation, addition,
+deletion, port, refactor, or derivative work based on the Licensed Materials.
+
+1.6. "Redistribute" means to provide a copy of the Licensed Materials or a
+Modification to another person or entity, whether in source, binary,
+container, virtual-machine, archive, package, or any other form.
+
+1.7. "Community Server" means an instance of the Licensed Materials operated
+for personal, educational, research, preservation, testing, or non-commercial
+community play.
+
+1.8. "Commercial Use" means use primarily intended for commercial advantage,
+monetary compensation, business benefit, or revenue generation. Commercial Use
+includes, without limitation:
+
+  a. selling or licensing source code, binaries, builds, packages, or
+     Modifications;
+  b. charging users for access to a server operated with the Licensed
+     Materials;
+  c. offering paid hosting, managed hosting, software-as-a-service, hosted
+     game-server subscriptions, consulting bundles, or support packages whose
+     primary value derives from the Licensed Materials;
+  d. using the Licensed Materials as a substantial component of a paid product
+     or service; or
+  e. removing attribution and presenting the Licensed Materials or a
+     substantial Modification as independently authored for commercial gain.
+
+1.9. "Permitted Donations" means voluntary payments that:
+
+  a. are not required to access, use, queue for, or receive features in a
+     Community Server;
+  b. do not provide gameplay advantages, virtual items, ranks, priority,
+     exclusive access, support entitlements, or other consideration;
+  c. are clearly described as voluntary support; and
+  d. are not used to disguise a fee, subscription, sale, or Commercial Use.
+
+1.10. "Transparent Cost Sharing" means collecting no more than a reasonable,
+good-faith share of actual third-party infrastructure costs, such as VPS,
+domain, certificate, bandwidth, or storage expenses, provided that:
+
+  a. participation is not operated for profit;
+  b. costs and collections are disclosed to participants on request;
+  c. no developer labor, markup, management fee, premium access, or gameplay
+     advantage is sold; and
+  d. collected amounts are used only for the relevant Community Server's
+     infrastructure.
+
+2. COPYRIGHT LICENSE GRANT
+
+Subject to full compliance with this License, the Licensor grants You a
+worldwide, royalty-free, non-exclusive, non-transferable except as expressly
+permitted by redistribution under this License, and revocable-on-breach
+copyright license to:
+
+  a. access, inspect, and study the Licensed Materials;
+  b. reproduce the Licensed Materials for personal, educational, research,
+     preservation, testing, and non-commercial community purposes;
+  c. create Modifications;
+  d. operate one or more non-commercial Community Servers;
+  e. Redistribute the Licensed Materials and Modifications free of charge; and
+  f. publish forks and Modifications under the conditions of this License.
+
+No ownership is transferred. All rights not expressly granted are reserved.
+
+3. CONDITIONS FOR FORKS, MODIFICATIONS, AND REDISTRIBUTION
+
+Every copy, fork, Modification, binary build, package, or substantial derivative
+that You Redistribute must satisfy all of the following:
+
+3.1. Include a complete, unmodified copy of this LICENSE file.
+
+3.2. Include the NOTICE file and preserve all copyright, attribution, and
+third-party notices.
+
+3.3. Display, in a reasonably prominent location in the repository README,
+project documentation, or distribution interface, the following attribution
+or a substantially equivalent notice:
+
+  "Based on the HOC Community Server project. Original project and source:
+   [the repository URL identified in NOTICE]."
+
+3.4. Clearly state that the distributed version is modified when You have made
+substantial changes. You must not imply that Your Modification is the original
+or officially supported version.
+
+3.5. Provide the complete corresponding source code for the portions of the
+Licensed Materials and Modifications that You Redistribute, in the preferred
+form for making changes, at no additional charge.
+
+3.6. License the Redistributed Licensed Materials and Modifications under this
+same License. You may not apply additional terms that remove or restrict the
+permissions granted to downstream non-commercial users, and You may not
+relicense the Licensed Materials under a more permissive, commercial, or
+proprietary license.
+
+3.7. You may charge only the objectively reasonable physical cost of providing
+a copy on physical media. You may not charge for the software, source code,
+binary, license, download, support, access, or right to use it.
+
+4. NON-COMMERCIAL COMMUNITY OPERATION
+
+4.1. You may operate the Licensed Materials as a free Community Server.
+
+4.2. Permitted Donations and Transparent Cost Sharing do not, by themselves,
+constitute Commercial Use when all requirements in Sections 1.9 and 1.10 are
+met.
+
+4.3. You may not condition access, registration, gameplay, matchmaking,
+features, support, queue priority, virtual items, status, rank, or privileges on
+payment, donation, sponsorship, subscription, purchase, or other consideration.
+
+4.4. Advertising, sponsorship, affiliate marketing, data brokerage, paid
+promotion, cryptocurrency mining, or monetization integrated into or primarily
+promoting a Community Server constitutes Commercial Use unless the Licensor
+provides separate written permission.
+
+5. COMMERCIAL USE PROHIBITED WITHOUT SEPARATE PERMISSION
+
+No Commercial Use is permitted under this License. A person or entity seeking
+to sell, commercially host, monetize, sublicense, or commercially integrate the
+Licensed Materials must obtain a separate written commercial license from the
+project owner identified in NOTICE.
+
+The Licensor may grant different or commercial terms to other parties. Doing so
+does not change or terminate licenses already granted under this License.
+
+6. ATTRIBUTION AND INTEGRITY
+
+6.1. You may not remove, hide, falsify, or materially reduce required
+attribution, copyright, license, provenance, or modification notices.
+
+6.2. Attribution must be reasonably visible to a person viewing the source
+repository or distribution documentation. Attribution hidden only in source
+history, metadata, an inaccessible menu, or an unrelated web page is not
+sufficient.
+
+6.3. You may describe Your fork or server using Your own name, but You must not
+suggest that the Licensor authored, reviewed, endorses, operates, or supports
+Your Modification unless the Licensor has agreed in writing.
+
+7. TRADEMARKS AND PROJECT IDENTITY
+
+7.1. This License grants no trademark, trade-name, logo, domain-name, or
+branding rights.
+
+7.2. You may use the names "HOC Community Server" and "Heroes of Order & Chaos"
+only as reasonably necessary for truthful identification, compatibility,
+attribution, and historical reference.
+
+7.3. You may not imply affiliation with, endorsement by, sponsorship by, or
+authorization from Gameloft, the HOC Community Server project, or any rights
+holder.
+
+7.4. You may not use Gameloft logos, original game artwork, or official branding
+as the branding of Your fork or service unless You independently have the legal
+right to do so.
+
+8. CONTRIBUTIONS
+
+8.1. Unless a separate written contributor agreement applies, any contribution
+intentionally submitted to this repository is offered under this License, and
+the contributor represents that they have the right to submit it.
+
+8.2. Contributors retain copyright in their contributions. They grant the
+project owner a perpetual, worldwide, royalty-free, non-exclusive license to
+use, reproduce, modify, distribute, publicly display, publicly perform, and
+incorporate the contribution into the project under this License.
+
+8.3. A contribution does not grant the project owner the right to relicense the
+contributor's contribution under unrelated commercial terms unless a separate
+written contributor agreement expressly provides that right.
+
+8.4. Do not submit proprietary third-party code, leaked material, game assets,
+decompiled source, credentials, personal data, or material You do not have the
+right to contribute.
+
+9. COMPLIANCE, TERMINATION, AND CURE
+
+9.1. Your rights under this License terminate automatically when You materially
+breach it.
+
+9.2. If this is Your first breach and You cure all curable violations within
+30 days after receiving notice or otherwise learning of the breach, Your rights
+are reinstated automatically as of the date the breach was fully cured.
+
+9.3. Repeated breach, intentional attribution removal, knowing Commercial Use,
+or continued distribution after notice is not automatically cured. The
+Licensor may reinstate rights only by written permission.
+
+9.4. On termination, You must stop using, operating, and Redistributing the
+Licensed Materials, remove publicly distributed unauthorized copies under Your
+control, and stop any prohibited commercial service.
+
+9.5. Sections concerning attribution, ownership, third-party rights,
+termination, disclaimers, liability, and general terms survive termination.
+
+10. NO PATENT OR OTHER IMPLIED LICENSE
+
+No patent, trademark, publicity, privacy, database, trade-secret, or other
+license is granted except the express copyright permissions in Section 2.
+No rights arise from estoppel, implication, exhaustion beyond applicable law,
+or the Licensor's silence.
+
+11. EXCLUDED THIRD-PARTY MATERIALS
+
+11.1. This License applies only to original project-authored material.
+
+11.2. It does not grant any rights to Heroes of Order & Chaos, Gameloft names or
+marks, the original client, APK, OBB files, native libraries, artwork, audio,
+video, maps, scripts, game data, extracted assets, decompiled code, or any other
+third-party material.
+
+11.3. The repository's compatibility references, protocol labels, and factual
+observations do not transfer ownership of third-party material and do not imply
+affiliation or authorization.
+
+11.4. You are solely responsible for obtaining any rights required for
+third-party clients, assets, trademarks, hosting, distribution, or operation in
+Your jurisdiction.
+
+12. LAWFUL USE
+
+You may not use the Licensed Materials to violate applicable law; infringe
+copyright, trademark, privacy, or other rights; bypass payment or access
+controls; distribute malware; attack third-party systems; or misrepresent an
+unofficial service as official.
+
+13. DISCLAIMER OF WARRANTY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED MATERIALS ARE
+PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY KIND, EXPRESS,
+IMPLIED, OR STATUTORY, INCLUDING WARRANTIES OF TITLE, NON-INFRINGEMENT,
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, SECURITY, RELIABILITY,
+AVAILABILITY, COMPATIBILITY, OR ACCURACY.
+
+THE LICENSOR DOES NOT GUARANTEE THAT THE LICENSED MATERIALS WILL OPERATE WITH
+ANY THIRD-PARTY CLIENT, NETWORK, DEVICE, PROVIDER, OR SERVICE, OR THAT ANY
+COMMUNITY SERVER WILL BE CONTINUOUS, SECURE, OR ERROR-FREE.
+
+14. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR AND CONTRIBUTORS
+WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+PUNITIVE, OR CONSEQUENTIAL DAMAGES; LOSS OF DATA, PROFITS, REVENUE, GOODWILL,
+USE, OR BUSINESS; SERVICE INTERRUPTION; DEVICE DAMAGE; ACCOUNT LOSS; OR CLAIMS
+ARISING FROM OR RELATED TO THE LICENSED MATERIALS OR THIS LICENSE, UNDER ANY
+LEGAL THEORY, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+WHERE LIABILITY CANNOT BE FULLY EXCLUDED, THE TOTAL AGGREGATE LIABILITY OF THE
+LICENSOR AND CONTRIBUTORS WILL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID
+DIRECTLY TO THE LICENSOR FOR THE LICENSED MATERIALS DURING THE 12 MONTHS BEFORE
+THE CLAIM, OR (B) TEN EURO (€10).
+
+15. INDEMNITY FOR UNAUTHORIZED COMMERCIAL OR MISREPRESENTED USE
+
+To the extent permitted by applicable law, You agree to defend and indemnify
+the Licensor and contributors against third-party claims, damages, penalties,
+and reasonable legal costs arising from Your unauthorized Commercial Use,
+misrepresentation of official affiliation, unlawful operation, or distribution
+of third-party materials not supplied under this License.
+
+16. GENERAL TERMS
+
+16.1. Entire Terms. This License and the incorporated NOTICE file state the
+complete license for the Licensed Materials unless the Licensor signs a
+separate written agreement.
+
+16.2. Severability. If a provision is held unenforceable, it will be limited or
+modified to the minimum extent necessary, and the remaining provisions will
+continue in effect.
+
+16.3. No Waiver. Failure to enforce a provision is not a waiver of that
+provision or any later breach.
+
+16.4. Assignment. You may not assign this License except as part of a permitted
+Redistribution that complies with all terms. The Licensor may assign ownership
+or enforcement rights in the Licensed Materials.
+
+16.5. Headings. Headings are for convenience and do not limit the terms.
+
+16.6. Language. The controlling language of this License is English. Any
+translation is informational only.
+
+16.7. Versioning. Only the project owner identified in NOTICE may publish a new
+version of the HOC Community Server Community Source License. You may continue
+using a version You validly received under that version's terms.
+
+17. ACCEPTANCE
+
+You accept this License by exercising any permission that would otherwise
+require copyright authorization, including copying, modifying, operating,
+building, or Redistributing the Licensed Materials. If You do not agree, You
+have no permission under this License to exercise those rights.
+
+END OF TERMS

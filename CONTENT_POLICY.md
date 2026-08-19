@@ -29,6 +29,13 @@ Keep this repository useful as a preservation handbook without redistributing ma
 
 Technical message identifiers and independently implemented field/state descriptions are allowed when they are necessary to explain interoperability. Gameloft binary code, assets, decompiled functions, patch bytes, or extracted tables are not. A private GitHub repository is not automatically safe to publish later.
 
+## Licensing rule
+
+Project-authored material is governed by `LICENSE` and `NOTICE`. A fork may not remove attribution,
+convert the project code to a commercial/proprietary license, or sell/monetize the server without
+separate written permission. Contributions must be owned by the contributor and submitted under
+the repository license unless a separate written contributor agreement applies.
+
 ## Takedown/contact
 
 Remove a disputed file first, preserve only a neutral factual summary, and seek legal advice before restoring it.

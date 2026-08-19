@@ -4,9 +4,13 @@ The `server/hoc-server/` directory contains the community server written from sc
 
 ## Ownership and licensing
 
-The server implementation, tests, packet builders, session model, match clock, account/edge logic, and documentation in this repository are original project work. They are **not licensed to third parties yet**. No permission to copy, redistribute, host, or sell this server code is granted by this archive until an explicit license is added.
+The server implementation, tests, packet builders, session model, match clock, account/edge logic, and documentation in this repository are original project work. They are licensed under the **HOC Community Server Community Source License 1.0**.
+
+The license allows free non-commercial use, study, forks, modifications, free redistribution, and free community-server operation when attribution and the same license are preserved. Selling the code or builds, charging for access, paid hosting/SaaS, or other commercial use requires separate written permission from the project owner.
 
 This ownership statement does not claim ownership of Heroes of Order & Chaos, Gameloft trademarks, the original client, original assets, or any third-party protocol vocabulary.
+
+See `LICENSE`, `NOTICE`, and `LICENSE_SERVER.md` for the complete terms.
 
 ## Main packages
 

@@ -1,0 +1,39 @@
+HOC COMMUNITY SERVER — NOTICE
+
+Original project:
+  HOC Community Server / Community Handbook
+
+Project owner and principal author:
+  Ömer
+
+Original project repository:
+  [TO BE FILLED BEFORE PUBLICATION]
+
+License:
+  HOC Community Server Community Source License, Version 1.0
+  See LICENSE.
+
+Required attribution for forks and redistributions:
+  "Based on the HOC Community Server project."
+  Include the original repository URL once it is available.
+
+Ownership boundary:
+  The original Go server source, tests, packet builders, session logic,
+  match synchronization, reconnect implementation, and original documentation
+  authored by this project are project-owned materials.
+
+Third-party boundary:
+  Heroes of Order & Chaos, Gameloft names and marks, the original client,
+  APK/OBB files, native libraries, artwork, audio, video, maps, scripts,
+  extracted data, and other original game materials are not owned by this
+  project and are not licensed by this NOTICE or LICENSE.
+
+Unofficial status:
+  This project is unofficial and is not affiliated with, endorsed by,
+  sponsored by, or supported by Gameloft.
+
+Legal note:
+  This notice and LICENSE are a project-drafted source-available license,
+  not legal advice. The repository should remain private until the project
+  owner has selected the final public repository identity and, preferably,
+  obtained a professional intellectual-property/licensing review.
