@@ -485,11 +485,57 @@ func handleKitabeFamily(c *Ctx) bool {
 		return true
 	}
 	a := acc(c)
+	if c.Sub == 0x4e {
+		result, payType, ownedIndex, tabletID := handleSleepTablet(c.Body, a)
+		body := kitabe.UnlockResponseWithResultCallback(a, result, payType, ownedIndex)
+		c.Send(c.Sub, body)
+		fmt.Printf(" [GS SENT] ★Kitabe SLEEP 0x4e result=%d tablet=%d pay=%d index=%d (%dB)\n",
+			result, tabletID, payType, ownedIndex, len(body))
+		return true
+	}
 	applyKitabeMutation(c.Sub, c.Body, a)
 	body := kitabe.UnlockResponse(a)
 	c.Send(c.Sub, body)
 	fmt.Printf(" [GS SENT] ★Kitabe ACK %#x (%dB)\n", c.Sub, len(body))
 	return true
+}
+
+func handleSleepTablet(body []byte, a *accounts.Account) (result, payType, ownedIndex, tabletID int) {
+	result = 1
+	if a == nil || len(body) == 0 {
+		return result, payType, ownedIndex, tabletID
+	}
+	rq, err := msgpack.Decode(body)
+	if err != nil {
+		return result, payType, ownedIndex, tabletID
+	}
+	arr, ok := rq.([]any)
+	if !ok || len(arr) < 5 {
+		return result, payType, ownedIndex, tabletID
+	}
+	packetIndex, ok := asInt(arr[3])
+	if !ok {
+		return result, payType, ownedIndex, tabletID
+	}
+	payType, _ = asInt(arr[4])
+	if payType != 5 {
+		return result, payType, ownedIndex, tabletID
+	}
+	tabletID, ok = kitabe.EquippedTabletAtPacketIndex(a.EquippedTablets(), packetIndex)
+	if !ok {
+		return result, payType, ownedIndex, tabletID
+	}
+	found := false
+	for i, id := range kitabe.TabletItemIDs() {
+		if id == tabletID {
+			ownedIndex, found = i, true
+			break
+		}
+	}
+	if !found || !a.SleepTabletWithEmblem(tabletID, 750) {
+		return result, payType, ownedIndex, tabletID
+	}
+	return 0, payType, ownedIndex, tabletID
 }
 
 var inscriptionNextTier = map[int]int{

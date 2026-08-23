@@ -2,6 +2,7 @@ package kitabe
 
 import (
 	"fmt"
+	"sort"
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/wire/msgpack"
@@ -153,6 +154,28 @@ func OwnedTabletsVector(sockets map[int]map[int][2]int, awake map[int]bool) []by
 	return out
 }
 
+func EquippedTabletAtPacketIndex(equipped map[[2]int]struct {
+	ID      int
+	Sockets map[int][2]int
+}, packetIndex int) (tabletID int, ok bool) {
+	if packetIndex < 0 {
+		return 0, false
+	}
+	keys := make([][2]int, 0, len(equipped))
+	for k, eq := range equipped {
+		if eq.ID > 0 {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i][0] < keys[j][0] || (keys[i][0] == keys[j][0] && keys[i][1] < keys[j][1])
+	})
+	if packetIndex >= len(keys) {
+		return 0, false
+	}
+	return equipped[keys[packetIndex]].ID, true
+}
+
 func EquippedSlotsVector(equipped map[[2]int]struct {
 	ID      int
 	Sockets map[int][2]int
@@ -182,14 +205,18 @@ func EquippedSlotsVector(equipped map[[2]int]struct {
 	}
 	var out []byte
 	out = append(out, msgpack.FixArray(len(slots))...)
-	for _, s := range slots {
+	for packetIndex, s := range slots {
 		isAwake := autoWakeAll || awake[s.id]
-		out = append(out, tabletSlot(SlotFilled, 0, 0, s.id, s.sock, isAwake)...)
+		out = append(out, tabletSlotWithPacketIndex(SlotFilled, 0, 0, s.id, s.sock, isAwake, packetIndex)...)
 	}
 	return out
 }
 
 func tabletSlot(state, emblemCost, runeCost, itemID int, socks map[int][2]int, awake bool) []byte {
+	return tabletSlotWithPacketIndex(state, emblemCost, runeCost, itemID, socks, awake, 0)
+}
+
+func tabletSlotWithPacketIndex(state, emblemCost, runeCost, itemID int, socks map[int][2]int, awake bool, packetIndex int) []byte {
 	var out []byte
 	out = append(out, msgpack.FixArray(6)...)
 	out = append(out, TabletInfo(itemID, socks, awake)...)
@@ -197,7 +224,7 @@ func tabletSlot(state, emblemCost, runeCost, itemID int, socks map[int][2]int, a
 	out = append(out, msgpack.Int(int64(emblemCost))...)
 	out = append(out, msgpack.Int(int64(runeCost))...)
 	out = append(out, msgpack.EmptyArray()...)
-	out = append(out, msgpack.Int(0)...)
+	out = append(out, msgpack.Int(int64(packetIndex))...)
 	return out
 }
 
@@ -237,6 +264,20 @@ func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]st
 			unlocked[page] = true
 		}
 	}
+	packetIndexes := map[[2]int]int{}
+	packetKeys := make([][2]int, 0, len(equipped))
+	for k, eq := range equipped {
+		if eq.ID > 0 {
+			packetKeys = append(packetKeys, k)
+		}
+	}
+	sort.Slice(packetKeys, func(i, j int) bool {
+		return packetKeys[i][0] < packetKeys[j][0] ||
+			(packetKeys[i][0] == packetKeys[j][0] && packetKeys[i][1] < packetKeys[j][1])
+	})
+	for i, k := range packetKeys {
+		packetIndexes[k] = i
+	}
 	var out []byte
 	out = append(out, msgpack.FixMap(numPages)...)
 	for page := 1; page <= numPages; page++ {
@@ -249,7 +290,9 @@ func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]st
 				slots = append(slots, tabletSlot(SlotLocked, 100*(si+1), 500*(si+1), 0, nil, false))
 			} else if ok && eq.ID != 0 {
 				aw := autoWakeAll || awake[eq.ID]
-				slots = append(slots, tabletSlot(SlotFilled, 0, 0, eq.ID, eq.Sockets, aw))
+				slots = append(slots, tabletSlotWithPacketIndex(
+					SlotFilled, 0, 0, eq.ID, eq.Sockets, aw, packetIndexes[[2]int{page0, si}],
+				))
 			} else if state, exists := states[fmt.Sprintf("%d:%d", page0, si)]; exists {
 				emblemCost, runeCost := 0, 0
 				if state == SlotLocked {
@@ -295,6 +338,16 @@ func GESubMember10(a *accounts.Account) []byte {
 
 // UnlockResponse builds S2C 0x4a (11-elem).
 func UnlockResponse(a *accounts.Account) []byte {
+	return UnlockResponseWithResultCallback(a, 0, 0, 0)
+}
+
+// UnlockResponseWithCallback keeps a successful full authoritative Kitabe state
+// while supplying the operation-specific callback target in trailing fields [9]/[10].
+func UnlockResponseWithCallback(a *accounts.Account, callbackA, callbackB int) []byte {
+	return UnlockResponseWithResultCallback(a, 0, callbackA, callbackB)
+}
+
+func UnlockResponseWithResultCallback(a *accounts.Account, result, callbackA, callbackB int) []byte {
 	emblem, runeV := 99999, 9999
 	if a != nil {
 		emblem, runeV = a.Emblem, a.Rune
@@ -311,7 +364,7 @@ func UnlockResponse(a *accounts.Account) []byte {
 	}
 	var out []byte
 	out = append(out, msgpack.FixArray(11)...)
-	out = append(out, msgpack.Int(0)...)
+	out = append(out, msgpack.Int(int64(result))...)
 	out = append(out, msgpack.Int(int64(emblem))...)
 	out = append(out, msgpack.Int(int64(runeV))...)
 	out = append(out, InscriptionMap(pairs)...)
@@ -320,8 +373,8 @@ func UnlockResponse(a *accounts.Account) []byte {
 	out = append(out, msgpack.Int(0)...)
 	out = append(out, msgpack.Int(0)...)
 	out = append(out, FullGroups(7, 3, true, equipped, aw, false, unlocked, states)...)
-	out = append(out, msgpack.Int(0)...)
-	out = append(out, msgpack.Int(0)...)
+	out = append(out, msgpack.Int(int64(callbackA))...)
+	out = append(out, msgpack.Int(int64(callbackB))...)
 	return out
 }
 

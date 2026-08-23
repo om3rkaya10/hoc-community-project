@@ -234,6 +234,47 @@ func TestMergeInscriptionRejectsMixedSources(t *testing.T) {
 	}
 }
 
+func TestSleepTabletDebitsEmblemAndReturnsTargetIndex(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw", "emblem": 2000,
+		"tablets": map[string]any{
+			"0:0": map[string]any{"id": 464},
+			"0:1": map[string]any{"id": 465},
+			"0:2": map[string]any{"id": 467},
+			"1:1": map[string]any{"id": 469},
+		},
+		"awake_tablets": []int{464, 465, 467, 469},
+	})
+	// Captured shape: [26,user,1,packetIndex=2,payType=5,6,page=2].
+	// packetIndex addresses EquippedSlotsVector globally, not a page-local slot.
+	body, err := hex.DecodeString("971aa67465737465720102050602")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x4e,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if emblem, _, _ := a.Wallet(); emblem != 1250 {
+		t.Fatalf("emblem=%d, want 1250", emblem)
+	}
+	if a.AwakeTablets()[467] {
+		t.Fatal("tablet 467 remained awake")
+	}
+	v, err := msgpack.Decode(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top := v.([]any)
+	if got := top[1]; got != int64(1250) {
+		t.Fatalf("response emblem=%v, want 1250", got)
+	}
+	if top[9] != int64(5) || top[10] != int64(3) {
+		t.Fatalf("callback target=%v/%v, want payType=5 owned-index=3", top[9], top[10])
+	}
+}
+
 func TestM5ResidualRegistryIsTyped(t *testing.T) {
 	for _, sub := range []uint16{
 		0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50, 0x51, 0x52, 0x53,

@@ -135,6 +135,9 @@ func Load(path string) error {
 			a.RevivalRunes = 99
 			dirty = true
 		}
+		if a.normalizeDuplicateTabletsLocked() {
+			dirty = true
+		}
 		if a.ensureAgeGateLocked() {
 			dirty = true
 		}
@@ -989,6 +992,42 @@ func (a *Account) SetBackpackSockets(tabletID int, sockets map[int][2]int) {
 	})
 }
 
+func (a *Account) normalizeDuplicateTabletsLocked() bool {
+	if a == nil || len(a.Tablets) < 2 {
+		return false
+	}
+	type placed struct {
+		key        string
+		page, slot int
+	}
+	placements := make([]placed, 0, len(a.Tablets))
+	for key := range a.Tablets {
+		var page, slot int
+		if _, err := fmt.Sscanf(key, "%d:%d", &page, &slot); err == nil {
+			placements = append(placements, placed{key: key, page: page, slot: slot})
+		}
+	}
+	sort.Slice(placements, func(i, j int) bool {
+		return placements[i].page < placements[j].page ||
+			(placements[i].page == placements[j].page && placements[i].slot < placements[j].slot)
+	})
+	seen := map[int]bool{}
+	changed := false
+	for _, p := range placements {
+		rec := a.Tablets[p.key]
+		if rec.ID <= 0 {
+			continue
+		}
+		if seen[rec.ID] {
+			delete(a.Tablets, p.key)
+			changed = true
+			continue
+		}
+		seen[rec.ID] = true
+	}
+	return changed
+}
+
 func (a *Account) EquipTablet(page, slot, tabletID int) {
 	if a == nil || tabletID <= 0 || page < 0 || page > 6 || slot < 0 || slot > 2 {
 		return
@@ -997,8 +1036,14 @@ func (a *Account) EquipTablet(page, slot, tabletID int) {
 		if a.Tablets == nil {
 			a.Tablets = map[string]TabletRec{}
 		}
+		targetKey := fmt.Sprintf("%d:%d", page, slot)
+		for key, rec := range a.Tablets {
+			if key != targetKey && rec.ID == tabletID {
+				delete(a.Tablets, key)
+			}
+		}
 		sockets := tabletSocketsLocked(a)[tabletID]
-		a.Tablets[fmt.Sprintf("%d:%d", page, slot)] = TabletRec{
+		a.Tablets[targetKey] = TabletRec{
 			ID:      tabletID,
 			Sockets: socketsToJSON(sockets),
 		}
@@ -1130,6 +1175,27 @@ func (a *Account) UnlockPage(page int) []int {
 		a.UnlockedPages = append([]int(nil), pages...)
 	})
 	return pages
+}
+
+// SleepTabletWithEmblem atomically charges the unlock cost and removes one
+// tablet from the awake set. Repeating an already-completed sleep is idempotent.
+func (a *Account) SleepTabletWithEmblem(tabletID, cost int) bool {
+	if a == nil || tabletID <= 0 || cost < 0 {
+		return false
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	awake := awakeTabletsLocked(a)
+	if !awake[tabletID] {
+		return true
+	}
+	if a.Emblem < cost {
+		return false
+	}
+	a.Emblem -= cost
+	removeAwakeLocked(a, tabletID)
+	_ = saveLocked()
+	return true
 }
 
 func (a *Account) Debit(payType, amount int) (emblem, runeV, gems int) {

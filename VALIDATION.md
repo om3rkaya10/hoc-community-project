@@ -65,9 +65,11 @@ Additional V3 profile validation covered:
 - spending the full budget, saving, and reopening with zero remaining points and no duplicate grant;
 - a starter Revival Rune quantity visible after a cold login;
 - normal inscription exchange consuming four identical lower-tier inscriptions and producing one matching next-tier inscription;
+- reopening a filled tablet for 750 Emblem on a clean account, with the exact debit persisted and the tablet returning to an editable state;
+- stable card-to-tablet targeting across page and equipped views, without opening a different tablet;
 - inventory persistence after leaving and reopening the relevant UI.
 
-The matching V1 suite verifies valid-zero handling, deterministic talent clamping, idempotent account migration, authoritative inventory replay, atomic exchange, and rejection of mixed or insufficient source inventories.
+The matching V1 suite verifies valid-zero handling, deterministic talent clamping, idempotent account migration, authoritative inventory replay, atomic exchange, rejection of mixed or insufficient source inventories, idempotent tablet reopen, stable packet-index round trips, and duplicate equipped-tablet normalization.
 
 ### Physical phone over WAN — V4
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## server-v0.1.3 — 2026-08-23
+
+### Tablet reopen and equipment-state fixes
+
+- Implemented the 750-Emblem tablet reopen transaction with exact wallet persistence.
+- Made repeated successful reopen requests idempotent so they do not charge twice.
+- Preserved one stable packet identity for each equipped tablet across the equipped list and page/card views.
+- Resolved reopen targets through the client-returned equipped packet index instead of treating it as a page-local slot.
+- Prevented one tablet item from being equipped in multiple slots; equipping it again now moves it.
+- Added deterministic legacy-account normalization for duplicate equipped-tablet records.
+- Added regression coverage for insufficient balance, packet-index round trips, duplicate prevention, and legacy cleanup.
+
 ## server-v0.1.2 — 2026-08-23
 
 ### Server profile and Kitabe fixes

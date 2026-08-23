@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, and `server-v0.1.2`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, and `server-v0.1.3`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.3
+
+`server-v0.1.3` is a Kitabe tablet-state maintenance release. It implements the 750-Emblem reopen transaction, keeps the debit idempotent, preserves stable tablet packet identities across all rendered views, prevents duplicate equipped-tablet records, and normalizes legacy duplicate state. The release is backed by the deterministic Go suite and recorded V3 clean-account validation in `VALIDATION.md`.
 
 ### server-v0.1.2
 
