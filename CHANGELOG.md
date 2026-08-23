@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — handbook seed
+## server-v0.1.2 — 2026-08-23
 
 ### Server profile and Kitabe fixes
 
@@ -11,6 +11,8 @@
 - Implemented normal inscription tier exchange as an atomic four-source-to-one-target transaction.
 - Rejected mixed-source, unknown-recipe, malformed, and insufficient-inventory exchange requests without mutation.
 - Added regression tests for profile normalization, inventory replay, talent limits, and inscription exchange.
+
+## Unreleased — handbook seed
 
 - Created a documentation-first, private-ready handbook structure.
 - Added IP/content boundary, compatibility notes, architecture, preservation method, beta operations, and security policy.

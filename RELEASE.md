@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0` and `server-v0.1.1`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, and `server-v0.1.2`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.2
+
+`server-v0.1.2` is a client-visible profile and Kitabe maintenance release. It includes shared talent-budget fixes, valid exhausted-balance persistence, idempotent Revival Rune starter inventory, and atomic normal inscription tier exchange. The release is backed by the deterministic Go suite and recorded V3 real-client validation in `VALIDATION.md`.
 
 ## Distribution channels
 
@@ -101,7 +105,7 @@ This project is published as-is. Each contributor, redistributor, operator, and 
 ## Current links
 
 - Repository: https://github.com/om3rkaya10/hoc-community-project
-- Latest server release: `server-v0.1.1`
+- Latest server release: `server-v0.1.2`
 - Container: `ghcr.io/om3rkaya10/hoc-community-project`
 
 ## Documentation-only note
