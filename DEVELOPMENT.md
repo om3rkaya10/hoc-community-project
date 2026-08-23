@@ -29,7 +29,9 @@ go vet ./...
 go test ./... -count=1
 ```
 
-The tests cover account normalization, configuration, packet builders/parsers, room/session state, match clock behavior, WAN write handling, reconnect logic, and edge/lobby/game-server handlers using deterministic test doubles.
+The tests cover account normalization, shared talent-budget enforcement, valid zero balances, idempotent starter inventory, atomic inscription exchange, configuration, packet builders/parsers, room/session state, match clock behavior, WAN write handling, reconnect logic, and edge/lobby/game-server handlers using deterministic test doubles.
+
+For account inventory mutations, validate all preconditions before changing state and perform consume/grant operations under one account lock and persistence step. A failed transaction must leave the source and target inventories unchanged. Starter grants belong in account creation or legacy migration, not in a per-login additive path.
 
 These checks do not prove that the original Android client reaches the same state. Real-client evidence is recorded in `VALIDATION.md`.
 

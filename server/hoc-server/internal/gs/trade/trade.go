@@ -492,6 +492,39 @@ func handleKitabeFamily(c *Ctx) bool {
 	return true
 }
 
+var inscriptionNextTier = map[int]int{
+	447: 480, 448: 482, 449: 484, 450: 486, 451: 488,
+	452: 490, 454: 513, 455: 494, 456: 496, 457: 498,
+	458: 500, 459: 502, 460: 504, 461: 506, 462: 508, 463: 510,
+	480: 481, 482: 483, 484: 485, 486: 487, 488: 489,
+	490: 491, 513: 493, 494: 495, 496: 497, 498: 499,
+	500: 501, 502: 503, 504: 505, 506: 507, 508: 509, 510: 511,
+}
+
+func mergeInscriptionSource(arr []any) (sourceID, targetID int, ok bool) {
+	// Captured 0x50 layout: [26, username, 0, vector<InscriptionInfo>, 6].
+	if len(arr) < 4 {
+		return 0, 0, false
+	}
+	rows, ok := arr[3].([]any)
+	if !ok || len(rows) != 4 {
+		return 0, 0, false
+	}
+	for i, raw := range rows {
+		row, ok := raw.([]any)
+		if !ok || len(row) == 0 {
+			return 0, 0, false
+		}
+		id, ok := asInt(row[0])
+		if !ok || id <= 0 || (i > 0 && id != sourceID) {
+			return 0, 0, false
+		}
+		sourceID = id
+	}
+	targetID, ok = inscriptionNextTier[sourceID]
+	return sourceID, targetID, ok
+}
+
 func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 	if a == nil || len(body) == 0 {
 		return
@@ -508,6 +541,17 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 	ids := kitabe.TabletItemIDs()
 
 	switch sub {
+	case 0x50:
+		sourceID, targetID, ok := mergeInscriptionSource(arr)
+		if !ok {
+			fmt.Printf(" [GS] ★0x50 MERGE rejected malformed/unknown recipe\n")
+			return
+		}
+		if !a.ExchangeInscriptions(sourceID, targetID, 4) {
+			fmt.Printf(" [GS] ★0x50 MERGE rejected source=%d target=%d insufficient\n", sourceID, targetID)
+			return
+		}
+		fmt.Printf(" [GS] ★0x50 MERGE source=%d x4 target=%d x1\n", sourceID, targetID)
 	case 0x4b:
 		page, slot, idx := kitabeWirePageSlot(arr, page0, "slot_first")
 		if slot == nil {

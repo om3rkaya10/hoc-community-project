@@ -78,6 +78,41 @@ func TestBuyItemCustomLightOwnership(t *testing.T) {
 	}
 }
 
+func TestUserInfoCarriesRevivalRunes(t *testing.T) {
+	b := wiregs.BuildUserInfo(&accounts.Account{RevivalRunes: 99})
+	v, err := msgpack.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := v.([]any)[7].([]any)
+	if len(items) != 1 {
+		t.Fatalf("GetUserInfo items=%d, want one Revival Rune entry", len(items))
+	}
+	item := items[0].([]any)
+	if len(item) != 7 || item[0] != int64(141) || item[3] != int64(99) {
+		t.Fatalf("Revival Rune ItemInfo=%#v, want id=141 quantity=99 at client-consumed field [3]", item)
+	}
+}
+
+func TestBuyItemReplaysRevivalRunes(t *testing.T) {
+	b := wiregs.BuildBuyItem(&accounts.Account{RevivalRunes: 99}, wiregs.BuyItemOptions{
+		Ownership: true,
+		Kitabe:    true,
+	})
+	v, err := msgpack.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := v.([]any)[13].([]any)
+	if len(items) != 1 {
+		t.Fatalf("BuyItem items=%d, want one Revival Rune entry", len(items))
+	}
+	item := items[0].([]any)
+	if len(item) != 7 || item[0] != int64(141) || item[3] != int64(99) {
+		t.Fatalf("Revival Rune ItemInfo=%#v, want id=141 quantity=99 at client-consumed field [3]", item)
+	}
+}
+
 func TestUserInfoCarriesTabletCapacity(t *testing.T) {
 	b := wiregs.BuildUserInfo(&accounts.Account{TabletPacketSize: 75})
 	v, err := msgpack.Decode(b)

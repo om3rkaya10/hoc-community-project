@@ -10,6 +10,34 @@ import (
 	"hoc-server/internal/wire/msgpack"
 )
 
+const revivalRuneItemID = 141 // Item_Prototype: "Revival Rune" / Canlandırma Runiği
+
+func itemInfo(itemID, quantity int) []byte {
+	var out []byte
+	out = append(out, msgpack.FixArray(7)...)
+	out = append(out, msgpack.Int(int64(itemID))...)
+	out = append(out, msgpack.RawStr(nil)...)
+	out = append(out, msgpack.Int(0)...)
+	// setUserInfo copies ItemInfo source +0x0c (wire [3]) into the
+	// getItemCount() entry's quantity field. Wire [2] is not the count.
+	out = append(out, msgpack.Int(int64(quantity))...)
+	out = append(out, msgpack.Int(0)...)
+	out = append(out, msgpack.EmptyArray()...)
+	out = append(out, msgpack.EmptyArray()...)
+	return out
+}
+
+func inventoryVector(a *accounts.Account) []byte {
+	quantity := 99
+	if a != nil && a.RevivalRunes > 0 {
+		quantity = a.RevivalRunes
+	}
+	var out []byte
+	out = append(out, msgpack.FixArray(1)...)
+	out = append(out, itemInfo(revivalRuneItemID, quantity)...)
+	return out
+}
+
 // BuildUserInfo — trade sub1. Talent map at [14] when SERVER_TALENT (wipe-safe).
 func BuildUserInfo(a *accounts.Account) []byte {
 	level, runeV, emblem, gems := 40, 9999, 99999, 99999
@@ -80,7 +108,11 @@ func BuildUserInfo(a *accounts.Account) []byte {
 	out = append(out, msgpack.EmptyArray()...)
 	out = append(out, intvec...)
 	for i := 4; i <= 12; i++ {
-		out = append(out, msgpack.EmptyArray()...)
+		if i == 7 {
+			out = append(out, inventoryVector(a)...)
+		} else {
+			out = append(out, msgpack.EmptyArray()...)
+		}
 	}
 	out = append(out, msgpack.EmptyMap()...)
 	out = append(out, tmap...)
@@ -164,8 +196,9 @@ func BuildBuyItem(a *accounts.Account, opts BuyItemOptions) []byte {
 	out = append(out, heroVector(a, opts.Ownership)...) // [11] owned
 	out = append(out, heroVector(a, opts.Ownership)...) // [12] valid/status
 	if withKitabe {
-		// [13]..[16] empty pads; [17] GESubMember10 (Python pin — typed right)
-		out = append(out, msgpack.EmptyArray()...)
+		// [13] ItemInfo inventory must replay the same authoritative state as
+		// GetUserInfo[7]; the client assigns rather than merges this vector.
+		out = append(out, inventoryVector(a)...)
 		out = append(out, msgpack.EmptyArray()...)
 		out = append(out, msgpack.EmptyArray()...)
 		out = append(out, msgpack.EmptyArray()...)

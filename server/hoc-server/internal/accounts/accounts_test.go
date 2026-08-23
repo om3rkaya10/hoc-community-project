@@ -158,7 +158,7 @@ func TestTemporaryRegistrationPersistsDistinctIdentity(t *testing.T) {
 	if first.Username != "bluefox" || first.Nickname != "BlueFox" || !first.Temporary {
 		t.Fatalf("first identity=%+v", first)
 	}
-	if first.Level != 40 || first.Rune == 0 || first.Emblem == 0 || first.Gems == 0 {
+	if first.Level != 40 || first.Rune == 0 || first.Emblem == 0 || first.Gems == 0 || first.RevivalRunes != 99 {
 		t.Fatalf("temporary account is not play-ready: %+v", first)
 	}
 	firstAccess, firstJanus := accounts.TokensFor(first)

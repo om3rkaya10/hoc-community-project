@@ -59,6 +59,16 @@ account/edge bootstrap
 
 Historical records describe repeated Nox and dual-Nox validation of custom rooms, seat/hero state, ready/load/start, two-player shared matches, survivor behavior, reconnect replay, the shared 30 Hz frame clock, and movement/skill relay.
 
+Additional V3 profile validation covered:
+
+- all four talent classes visible with one shared 40-point budget;
+- spending the full budget, saving, and reopening with zero remaining points and no duplicate grant;
+- a starter Revival Rune quantity visible after a cold login;
+- normal inscription exchange consuming four identical lower-tier inscriptions and producing one matching next-tier inscription;
+- inventory persistence after leaving and reopening the relevant UI.
+
+The matching V1 suite verifies valid-zero handling, deterministic talent clamping, idempotent account migration, authoritative inventory replay, atomic exchange, and rejection of mixed or insufficient source inventories.
+
 ### Physical phone over WAN — V4
 
 A physical Android phone completed authentication, lobby, custom-room, game-server login, ready, LoadMap, StartPlay, and gameplay without PCAPdroid, VPN, or proxy. Server-side timing and a separate TCP capture showed regular frame pacing in the tested environment. This is not a universal device or latency guarantee.

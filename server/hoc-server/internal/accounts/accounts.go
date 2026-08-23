@@ -39,20 +39,21 @@ type TalentGroupRec struct {
 }
 
 type Account struct {
-	Username  string `json:"username"`
-	Password  string `json:"password"`
-	Nickname  string `json:"nickname"`
-	UserID    int64  `json:"user_id"`
-	AccountID string `json:"account_id"`
-	Temporary bool   `json:"temporary,omitempty"`
-	Device    bool   `json:"device,omitempty"`
-	Level     int    `json:"level"`
-	Exp       int    `json:"exp"`
-	Rune      int    `json:"rune"`
-	Emblem    int    `json:"emblem"`
-	Gems      int    `json:"gems"`
-	Gateway   string `json:"gateway"`
-	GSHost    string `json:"gs_host"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	Nickname     string `json:"nickname"`
+	UserID       int64  `json:"user_id"`
+	AccountID    string `json:"account_id"`
+	Temporary    bool   `json:"temporary,omitempty"`
+	Device       bool   `json:"device,omitempty"`
+	Level        int    `json:"level"`
+	Exp          int    `json:"exp"`
+	Rune         int    `json:"rune"`
+	Emblem       int    `json:"emblem"`
+	Gems         int    `json:"gems"`
+	RevivalRunes int    `json:"revival_runes"`
+	Gateway      string `json:"gateway"`
+	GSHost       string `json:"gs_host"`
 
 	// DlgAge / Gaia profiles/me (Python pin 2026-07-25): empty birthdate ⇒ yaş sorar every login.
 	Age        int              `json:"age"`
@@ -128,6 +129,11 @@ func Load(path string) error {
 		}
 		if a.TalentPoints <= 0 {
 			a.TalentPoints = config.TalentPointsDefault
+			dirty = true
+		}
+		if a.RevivalRunes <= 0 {
+			a.RevivalRunes = 99
+			dirty = true
 		}
 		if a.ensureAgeGateLocked() {
 			dirty = true
@@ -453,7 +459,7 @@ func newTemporaryAccountLocked(username, nickname, password string, device bool)
 	a := &Account{
 		Username: username, Password: password, Nickname: nickname,
 		UserID: userID, AccountID: strconv.FormatInt(userID, 10), Temporary: true, Device: device,
-		Level: 40, Rune: 9999, Emblem: 99999, Gems: 99999, Gateway: gateway,
+		Level: 40, Rune: 9999, Emblem: 99999, Gems: 99999, RevivalRunes: 99, Gateway: gateway,
 		Age: DefaultAge, Gender: DefaultGender, IsSavedAge: 1,
 		GenderStr: genderIntToStr(DefaultGender), Birthdate: BirthdateFromAge(DefaultAge),
 		Collection: "full", TalentPoints: config.TalentPointsDefault, SelectedTabletGroup: 1,
@@ -914,6 +920,33 @@ func (a *Account) RemoveInscription(itemID, qty int) {
 			delete(a.Inscriptions, key)
 		}
 	})
+}
+
+// ExchangeInscriptions atomically consumes sourceQty identical inscriptions and
+// grants one target inscription. Insufficient inventory leaves state untouched.
+func (a *Account) ExchangeInscriptions(sourceID, targetID, sourceQty int) bool {
+	if a == nil || sourceID <= 0 || targetID <= 0 || sourceID == targetID || sourceQty < 1 {
+		return false
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if a.Inscriptions == nil {
+		return false
+	}
+	sourceKey := strconv.Itoa(sourceID)
+	if a.Inscriptions[sourceKey] < sourceQty {
+		return false
+	}
+	left := a.Inscriptions[sourceKey] - sourceQty
+	if left == 0 {
+		delete(a.Inscriptions, sourceKey)
+	} else {
+		a.Inscriptions[sourceKey] = left
+	}
+	targetKey := strconv.Itoa(targetID)
+	a.Inscriptions[targetKey]++
+	_ = saveLocked()
+	return true
 }
 
 func socketsToJSON(sockets map[int][2]int) map[string][]int {
@@ -1398,7 +1431,8 @@ func (a *Account) EnsureTalentPages() map[int]TalentGroupRec {
 func defaultTalentGroup(budget int) TalentGroupRec {
 	return TalentGroupRec{
 		Echo: budget, Unlocked: true, Limit: budget,
-		Talents: [][]int{}, Layers: []int{}, F18: budget,
+		Talents: [][]int{}, Layers: []int{},
+		F14: budget, F18: budget, F20: budget,
 	}
 }
 
@@ -1430,6 +1464,37 @@ func talentSpent(rows [][]int) int {
 	return spent
 }
 
+// clampTalentInfos enforces the one shared budget inside a talent preset.
+// Rows are kept in deterministic talent-ID order; the final positive rank is
+// truncated if necessary and all later ranks are dropped.
+func clampTalentInfos(rows [][]int, budget int) [][]int {
+	byID := map[int][]int{}
+	for _, row := range normalizeTalentInfos(rows) {
+		if row[0] > 0 && row[1] > 0 {
+			byID[row[0]] = row
+		}
+	}
+	ids := make([]int, 0, len(byID))
+	for id := range byID {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	remaining := maxInt(0, budget)
+	out := make([][]int, 0, len(ids))
+	for _, id := range ids {
+		if remaining == 0 {
+			break
+		}
+		row := append([]int(nil), byID[id]...)
+		if row[1] > remaining {
+			row[1] = remaining
+		}
+		remaining -= row[1]
+		out = append(out, row)
+	}
+	return out
+}
+
 func cloneTalentGroup(g TalentGroupRec) TalentGroupRec {
 	g.Talents = normalizeTalentInfos(g.Talents)
 	g.Layers = append([]int(nil), g.Layers...)
@@ -1451,12 +1516,17 @@ func ensureTalentPagesLocked(a *Account) map[int]TalentGroupRec {
 			g = defaultTalentGroup(budget)
 		}
 		g = cloneTalentGroup(g)
+		g.Talents = clampTalentInfos(g.Talents, budget)
 		g.Unlocked = true
 		g.Limit = budget
 		g.Echo = maxInt(0, budget-talentSpent(g.Talents))
-		g.F14 = 0
+		// SwitchToStyle maps the four visible talent classes to the four
+		// per-class budgets in TalentGroupInfo: F14, F18, Limit, F20.
+		// Leaving F14/F20 at zero locks Support/Guardian client-side before
+		// any C2S unlock request is emitted.
+		g.F14 = budget
 		g.F18 = budget
-		g.F20 = 0
+		g.F20 = budget
 		a.Talents[strconv.Itoa(gid)] = g
 		out[gid] = cloneTalentGroup(g)
 	}

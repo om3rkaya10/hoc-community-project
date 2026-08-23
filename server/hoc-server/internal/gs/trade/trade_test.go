@@ -1,6 +1,7 @@
 package trade
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -133,6 +134,103 @@ func TestTalentBatchUpsertsWithoutWipingOtherNodes(t *testing.T) {
 	}
 	if got := v.([]any)[4]; got != int64(31) {
 		t.Fatalf("reply remaining=%v", got)
+	}
+}
+
+func inscriptionQty(a *accounts.Account, itemID int) int {
+	for _, pair := range a.InscriptionPairs() {
+		if pair[0] == 1 && pair[2] == itemID {
+			return pair[3]
+		}
+	}
+	return 0
+}
+
+func TestMergeInscriptionCapturedSilverToGold(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"inscriptions": map[string]int{"494": 8},
+	})
+	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := msgpack.Decode(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("captured merge request=%#v", decoded)
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if got := inscriptionQty(a, 494); got != 4 {
+		t.Fatalf("source 494 qty=%d, want 4", got)
+	}
+	if got := inscriptionQty(a, 495); got != 1 {
+		t.Fatalf("target 495 qty=%d, want 1", got)
+	}
+	v, err := msgpack.Decode(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top := v.([]any); len(top) != 11 {
+		t.Fatalf("reply len=%d, want full Kitabe response", len(top))
+	}
+}
+
+func TestMergeInscriptionBronzeToSilver(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"inscriptions": map[string]int{"455": 4},
+	})
+	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i+2 < len(body); i++ {
+		if body[i] == 0xcd && body[i+1] == 0x01 && body[i+2] == 0xee {
+			body[i+2] = 0xc7
+		}
+	}
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Send: func(_ uint16, _ []byte) {},
+	})
+	if got := inscriptionQty(a, 455); got != 0 {
+		t.Fatalf("source 455 qty=%d, want 0", got)
+	}
+	if got := inscriptionQty(a, 494); got != 1 {
+		t.Fatalf("target 494 qty=%d, want 1", got)
+	}
+}
+
+func TestMergeInscriptionRejectsMixedSources(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"inscriptions": map[string]int{"494": 4, "498": 1},
+	})
+	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Change only the fourth source from 494 to 498.
+	hits := 0
+	for i := 0; i+2 < len(body); i++ {
+		if body[i] == 0xcd && body[i+1] == 0x01 && body[i+2] == 0xee {
+			hits++
+			if hits == 4 {
+				body[i+2] = 0xf2
+			}
+		}
+	}
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Send: func(_ uint16, _ []byte) {},
+	})
+	if inscriptionQty(a, 494) != 4 || inscriptionQty(a, 498) != 1 || inscriptionQty(a, 495) != 0 {
+		t.Fatalf("mixed request mutated inventory: %#v", a.InscriptionPairs())
 	}
 }
 

@@ -16,15 +16,11 @@ func talentInfo(a, b, c int) []byte {
 }
 
 func GroupInfo(g accounts.TalentGroupRec) []byte {
-	pts := config.TalentPointsDefault
+	// Zero is a valid exhausted balance. Account normalization supplies defaults
+	// for genuinely absent groups before they reach this wire builder; treating
+	// zero as "missing" grants another full budget after save.
 	echo := g.Echo
-	if echo <= 0 {
-		echo = pts
-	}
 	lim := g.Limit
-	if lim <= 0 {
-		lim = pts
-	}
 	// unlocked=True → wire bool=0 (RefreshPageInfo continues)
 	wireBool := !g.Unlocked
 	if !g.Unlocked {
