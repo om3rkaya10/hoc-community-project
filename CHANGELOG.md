@@ -1,5 +1,13 @@
 # Changelog
 
+## server-v0.1.4 — 2026-09-13
+
+### Wallet display and post-login bootstrap fixes
+
+- Corrected the BuyItem/BuyItemCRM wallet field order to the client's actual mapping (rune at `[4]`, emblem at `[5]`); the previous layout placed gems at `[4]`, so every purchase or return-to-lobby reply switched the rune HUD to 99999.
+- Kept the client's post-login bootstrap (alerts, device registration, CRM catalog) running with a true rune value: the GetUserInfo that precedes the login BuyItem now reports rune minus one so the client observes a non-zero wallet delta; the BuyItem that follows sets the true value. A zero delta at login left shop and hero-select item requests timing out.
+- Added regression coverage for the wallet index order and the login-inject rune delta.
+
 ## server-v0.1.3 — 2026-08-23
 
 ### Tablet reopen and equipment-state fixes

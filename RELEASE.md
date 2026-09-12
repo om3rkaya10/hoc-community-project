@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, and `server-v0.1.3`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, and `server-v0.1.4`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.4
+
+`server-v0.1.4` is a wallet-display and post-login bootstrap maintenance release. It sends the BuyItem/BuyItemCRM wallet fields in the order the client actually reads (rune `[4]`, emblem `[5]`), which stops the rune counter from jumping to 99999 after a purchase or a match, and it keeps the client's post-login bootstrap (alerts, device registration, CRM catalog) running by giving the login inject a non-zero rune delta. The release is backed by the deterministic Go suite and a recorded V3 Nox validation against the public server in `VALIDATION.md`. It pairs with client build Global Public Beta 0.3 (two client-side fixes: lobby icon corruption after a match, hero-select timeout after in-game logout/re-login).
 
 ### server-v0.1.3
 
@@ -109,7 +113,7 @@ This project is published as-is. Each contributor, redistributor, operator, and 
 ## Current links
 
 - Repository: https://github.com/om3rkaya10/hoc-community-project
-- Latest server release: `server-v0.1.2`
+- Latest server release: `server-v0.1.4`
 - Container: `ghcr.io/om3rkaya10/hoc-community-project`
 
 ## Documentation-only note

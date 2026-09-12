@@ -40,6 +40,25 @@ func inventoryVector(a *accounts.Account) []byte {
 
 // BuildUserInfo — trade sub1. Talent map at [14] when SERVER_TALENT (wipe-safe).
 func BuildUserInfo(a *accounts.Account) []byte {
+	return buildUserInfo(a, 0)
+}
+
+// BuildUserInfoLoginInject is the GetUserInfo that immediately precedes the
+// login BuyItem inject. It under-reports rune by 1 so that the following
+// BuyItem ([4]=true rune) produces a non-zero rune delta in the client's
+// BuyItem handler (DispatchTradeMsg @0x1290994: delta!=0 -> CCGiftInfo +
+// tracking path). Verified live 2026-09-13: with a zero delta at login the
+// client never starts its post-login Gaia chain (/alerts/me, /devices,
+// /locate/asset, game_object -> CRM) and the shop/hero-select item requests
+// time out ("Oyun sunucusundan yanıt bekleniyor"); with any non-zero delta
+// (old all-99999 layout gave +90000, experiment gave +1) the chain runs.
+// The BuyItem that follows sets the HUD to the true value, so nothing
+// user-visible changes. Do not use for the client's own 0x1 requests.
+func BuildUserInfoLoginInject(a *accounts.Account) []byte {
+	return buildUserInfo(a, -1)
+}
+
+func buildUserInfo(a *accounts.Account, runeAdj int) []byte {
 	level, runeV, emblem, gems := 40, 9999, 99999, 99999
 	nick, user := "Player", "player"
 	talentPts := config.TalentPointsDefault
@@ -63,6 +82,9 @@ func BuildUserInfo(a *accounts.Account) []byte {
 			selGroup = a.SelectedTabletGroup
 		}
 		tabletPkt = a.TabletCapacity()
+	}
+	if runeV+runeAdj >= 0 {
+		runeV += runeAdj
 	}
 	n := 0x12f
 	iv := make([]int64, n)
@@ -170,6 +192,19 @@ func heroVector(a *accounts.Account, enabled bool) []byte {
 
 // BuildBuyItem is the authoritative TradeMessageBuyItemResponse. Wallet fields
 // are absolute, and [11]/[12] always carry the same typed ownership truth.
+//
+// Client truth (libAndroid 3.6.5a, TradeMessageBuyItemResponse::msgpack_unpack
+// @0x012B96E4 + DispatchTradeMsg BuyItem case @0x012813F8, verified live
+// 2026-09-13 with Rune=9999/Gems=99999 distinct): the handler SETs
+//
+//	UserInfo rune   (+0x128) <- [4]   (struct +0x14)
+//	UserInfo emblem (+0x130) <- [5]   (struct +0x10)
+//	UserInfo gems   (+0x2d4) <- [27]  (struct +0x18; unreachable without
+//	                                   encoding [19] GESub5Member18, left out)
+//
+// [2]/[3]/[6]/[7]/[10] are not read by the wallet path. The old "[2]/[3]/[4]"
+// rule (AGENTS2) came from the all-99999 Python oracle and was wrong: it put
+// gems at [4], so every BuyItem/BuyItemCRM reply flipped the rune HUD to 99999.
 func BuildBuyItem(a *accounts.Account, opts BuyItemOptions) []byte {
 	emblem, runeV, gems := 99999, 9999, 99999
 	if a != nil {
@@ -184,12 +219,12 @@ func BuildBuyItem(a *accounts.Account, opts BuyItemOptions) []byte {
 	out = append(out, msgpack.FixArray(n)...)
 	out = append(out, msgpack.Int(0)...)
 	out = append(out, msgpack.RawStr(nil)...)
-	out = append(out, msgpack.Int(int64(emblem))...)
-	out = append(out, msgpack.Int(int64(runeV))...)
-	out = append(out, msgpack.Int(int64(gems))...)
-	out = append(out, msgpack.Int(int64(emblem))...)
-	out = append(out, msgpack.Int(int64(runeV))...)
-	out = append(out, msgpack.Int(int64(gems))...)
+	out = append(out, msgpack.Int(int64(emblem))...) // [2] (unused by wallet path)
+	out = append(out, msgpack.Int(int64(runeV))...)  // [3] (unused by wallet path)
+	out = append(out, msgpack.Int(int64(runeV))...)  // [4] -> UserInfo rune
+	out = append(out, msgpack.Int(int64(emblem))...) // [5] -> UserInfo emblem
+	out = append(out, msgpack.Int(int64(runeV))...)  // [6]
+	out = append(out, msgpack.Int(int64(gems))...)   // [7]
 	out = append(out, msgpack.EmptyMap()...)
 	out = append(out, msgpack.RawStr(nil)...)
 	out = append(out, msgpack.Int(int64(gems))...)

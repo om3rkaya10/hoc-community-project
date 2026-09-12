@@ -42,8 +42,12 @@ func TestBuyItemDualOwnershipAndWallet(t *testing.T) {
 	if len(top) != 18 {
 		t.Fatalf("top len=%d", len(top))
 	}
-	if top[2] != int64(11) || top[3] != int64(22) || top[4] != int64(33) {
-		t.Fatalf("wallet=%v/%v/%v", top[2], top[3], top[4])
+	// Client wallet path reads [4]=rune, [5]=emblem (see BuildBuyItem comment).
+	if top[4] != int64(22) || top[5] != int64(11) {
+		t.Fatalf("wallet [4]=rune/[5]=emblem got %v/%v", top[4], top[5])
+	}
+	if top[2] != int64(11) || top[3] != int64(22) {
+		t.Fatalf("legacy [2]/[3]=%v/%v", top[2], top[3])
 	}
 	owned := top[11].([]any)
 	valid := top[12].([]any)
@@ -203,4 +207,24 @@ func TestLoadMapSharedLocalSeat(t *testing.T) {
 
 func binaryLE32(b []byte) uint32 {
 	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
+}
+
+func TestUserInfoLoginInjectRuneDelta(t *testing.T) {
+	a := &accounts.Account{Emblem: 11, Rune: 22, Gems: 33}
+	dec := func(b []byte) []any {
+		v, err := msgpack.Decode(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.([]any)[3].([]any)
+	}
+	if iv := dec(wiregs.BuildUserInfo(a)); iv[2] != int64(22) {
+		t.Fatalf("plain iv[2]=%v", iv[2])
+	}
+	if iv := dec(wiregs.BuildUserInfoLoginInject(a)); iv[2] != int64(21) {
+		t.Fatalf("inject iv[2]=%v want 21", iv[2])
+	}
+	if iv := dec(wiregs.BuildUserInfoLoginInject(&accounts.Account{})); iv[2] != int64(0) {
+		t.Fatalf("zero rune must not go negative: %v", iv[2])
+	}
 }

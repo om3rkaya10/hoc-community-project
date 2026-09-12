@@ -396,10 +396,15 @@ func handleLogin(conn net.Conn, st *connState, seq uint16, payload []byte) {
 	if sess != nil {
 		acc = sess.Account
 	}
+	customSeat := custom && config.CustomNoLoadMap
 	bodyUI := wiregs.BuildUserInfo(acc)
+	if !customSeat {
+		// BuyItem follows: give the client a rune delta to chew on (see
+		// BuildUserInfoLoginInject).
+		bodyUI = wiregs.BuildUserInfoLoginInject(acc)
+	}
 	_, _ = conn.Write(wiregs.BuildReply(st.seq, 0x0d, 1, bodyUI, 0x24))
 	st.seq++
-	customSeat := custom && config.CustomNoLoadMap
 	if customSeat {
 		// Python LIVE pin: custom MatchSetting receives GetUserInfo only. Even a
 		// light BuyItem re-enters inventory handlers mid-seat and dirties the

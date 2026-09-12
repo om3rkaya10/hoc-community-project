@@ -67,7 +67,8 @@ Additional V3 profile validation covered:
 - normal inscription exchange consuming four identical lower-tier inscriptions and producing one matching next-tier inscription;
 - reopening a filled tablet for 750 Emblem on a clean account, with the exact debit persisted and the tablet returning to an editable state;
 - stable card-to-tablet targeting across page and equipped views, without opening a different tablet;
-- inventory persistence after leaving and reopening the relevant UI.
+- inventory persistence after leaving and reopening the relevant UI;
+- (server-v0.1.4, Nox against the public server) the rune counter staying at its true value after Emblem purchases in the shop and after returning from a match, while the shop and hero-select catalogs still load after a cold start and after an in-game logout/re-login.
 
 The matching V1 suite verifies valid-zero handling, deterministic talent clamping, idempotent account migration, authoritative inventory replay, atomic exchange, rejection of mixed or insufficient source inventories, idempotent tablet reopen, stable packet-index round trips, and duplicate equipped-tablet normalization.
 
