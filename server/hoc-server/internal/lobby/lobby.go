@@ -115,7 +115,9 @@ func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt
 		_, _ = conn.Write(rep)
 		fmt.Printf(" [LOBBY#%d SENT] 0x2103 user=%s nick=%q id=%d gateway=%s registered=%v\n",
 			peer, sess.Username, accountNick(acc), uid, sess.Gateway(), created)
-		_, _ = conn.Write(glblock.FlagsGLSReady())
+		glc := glblock.GuildLoginComplete()
+		_, _ = conn.Write(glc)
+		fmt.Printf(" [LOBBY#%d SENT] 0x6000 guild-login-complete (%dB)\n", peer, len(glc))
 
 	case 0x120b: // SearchRelayRoom — hybrid: SUCCESS until profile delivered
 		gsip := sess.Gateway()

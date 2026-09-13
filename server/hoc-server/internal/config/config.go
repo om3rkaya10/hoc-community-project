@@ -111,10 +111,18 @@ const (
 	PushHostUserList    = true
 
 	// Account systems (Python pin names).
-	ServerKitabe          = true
-	LoginBuyItemKitabe    = true // BuyItem[17] GESub on login (user-requested)
-	KitabeSeedAfterMenu   = true
-	KitabeSeedDelayMS     = 500
+	ServerKitabe        = true
+	LoginBuyItemKitabe  = true // BuyItem[17] GESub on login (user-requested)
+	KitabeSeedAfterMenu = true
+	KitabeSeedDelayMS   = 500
+	// Every account is granted the full tablet set (beta economy); deleted
+	// tablets can be bought back from the shop.
+	KitabeGrantAllTablets = true
+	// Tablet reopen ("Uyut" 0x4e) prices. The client falls back to 750/20 when
+	// GetUserInfo iv[0x4f]/iv[0x50] are 0 (DlgTabletPage::onClicked
+	// @0x1229940); they are sent explicitly so both sides agree.
+	KitabeSleepEmblem     = 750
+	KitabeSleepRune       = 20
 	ServerTalent          = true
 	ServerTalentLoginSeed = false
 	ServerTalentSeatSeed  = false

@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, and `server-v0.1.4`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, and `server-v0.1.5`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.5
+
+`server-v0.1.5` is an inventory and in-match passives release. It fixes tablet reopen/delete targeting (the server now uses the client's owned-tablet index space and accepts the Rune reopen price), routes shop purchases by item type (emblem packs credit Emblems, bundles expand, consumables reach the Items tab, poles/banners are owned in the Flags screen) with a one-time account migration, keeps flag ownership and selection across purchases and re-login, unblocks the Flags tab, and carries awake tablets, talents and the battle banner in the LoadMap PlayerInfo. It is backed by the deterministic Go suite and a recorded V3 Nox validation against the public server in `VALIDATION.md`. No client update is required; it pairs with Global Public Beta 0.3.
 
 ### server-v0.1.4
 

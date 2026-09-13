@@ -394,7 +394,61 @@ func ReLoginAckFail(roomID, seat0, tskcid int, errCode int32) []byte {
 	return out
 }
 
+// PIExtra carries the PlayerInfo fields the client normally syncs from its
+// own UserInfo (SyncPlayerInfoFromUserInfo / SyncPlayerTalent /
+// DlgMatchSettingViewBase::SyncPlayerBanners) but which LoadMap's
+// PlayerInfoDecode @0x1244044 overwrites from the wire. Flat int index for a
+// PlayerInfo offset X >= 0x50 is 10 + (X-0x50)/8 (8-byte ProtectedInt stride).
+type PIExtra struct {
+	AwakeWire   []int32    // PI+0x358..+0x3f0 (ints[107..126]): awake tablet + socket ids as proto+0x28
+	TalentPage  int32      // PI+0x40 (ints[8])
+	Talents     [][2]int32 // {id, rank}, slot i=1..0x27 -> id ints[12+i], rank ints[52+i]
+	Pole        int32      // PI+0x3f8 (ints[127])
+	Pattern     int32      // PI+0x400 (ints[128])
+	PatternUses int32      // PI+0x408 (ints[129]) = GetPatternCount(pattern)
+}
+
+const (
+	piAwakeWire0   = 107
+	piAwakeSlots   = 20
+	piTalentPage   = 8
+	piTalentMax    = 0x27
+	piPoleWire     = 127
+	piPatternWire  = 128
+	piPatternCount = 129
+)
+
+func (e *PIExtra) apply(ints []int32) {
+	if e == nil {
+		return
+	}
+	for i, v := range e.AwakeWire {
+		if i >= piAwakeSlots {
+			break
+		}
+		ints[piAwakeWire0+i] = v
+	}
+	if e.TalentPage > 0 {
+		ints[piTalentPage] = e.TalentPage
+	}
+	for i, t := range e.Talents {
+		slot := i + 1
+		if slot > piTalentMax || t[0] <= 0 || t[1] <= 0 {
+			continue
+		}
+		ints[12+slot] = t[0]
+		ints[52+slot] = t[1]
+	}
+	ints[piPoleWire] = e.Pole
+	ints[piPatternWire] = e.Pattern
+	ints[piPatternCount] = e.PatternUses
+}
+
 func EncodePI(heroID, skin, spell1, spell2, seat0Based int, occupied, inRoom, isOwner bool, nick, guid string, allowUTF bool) []byte {
+	return EncodePIExtra(heroID, skin, spell1, spell2, seat0Based, occupied, inRoom, isOwner, nick, guid, allowUTF, nil)
+}
+
+func EncodePIExtra(heroID, skin, spell1, spell2, seat0Based int, occupied, inRoom, isOwner bool, nick, guid string, allowUTF bool, extra *PIExtra) []byte {
 	ints := make([]int32, PINumInts)
 	if occupied {
 		site0 := seat0Based
@@ -418,6 +472,7 @@ func EncodePI(heroID, skin, spell1, spell2, seat0Based int, occupied, inRoom, is
 		if heroID != 0 {
 			ints[10] = int32(spell1)
 			ints[11] = int32(spell2)
+			extra.apply(ints)
 		}
 	}
 	out := make([]byte, 0, PISize)
@@ -443,10 +498,10 @@ func EncodePI(heroID, skin, spell1, spell2, seat0Based int, occupied, inRoom, is
 
 // LoadMapSolo builds a single-seat LoadMap. It keeps every custom-room
 // option at its default (-1 / false), so map defaults are preserved.
-func LoadMapSolo(tskcid, hero, skin, spell1, spell2, gsiMode, gsiParam int, nick, guid string) []byte {
+func LoadMapSolo(tskcid, hero, skin, spell1, spell2, gsiMode, gsiParam int, nick, guid string, extra *PIExtra) []byte {
 	return LoadMapShared(tskcid, 1, 0, gsiMode, gsiParam, config.DefaultCustomRoomOptions(), []LoadMapMember{{
 		Seat0: 0, Hero: hero, Skin: skin, Spell1: spell1, Spell2: spell2,
-		Nick: nick, GUID: guid, IsOwner: true,
+		Nick: nick, GUID: guid, IsOwner: true, Extra: extra,
 	}})
 }
 
@@ -457,6 +512,7 @@ type LoadMapMember struct {
 	Spell1, Spell2 int
 	Nick, GUID     string
 	IsOwner        bool
+	Extra          *PIExtra // kitabe awake / talent / banner (nil = none)
 }
 
 // LoadMapShared — same seed+roster for every dest; localSeat is 1-based for recipient.
@@ -525,7 +581,7 @@ func LoadMapShared(tskcid, localSeat, seed, gsiMode, gsiParam int, opts config.C
 		m, ok := bySeat[seat]
 		pi := empty
 		if ok && m.Hero > 0 {
-			pi = EncodePI(m.Hero, m.Skin, m.Spell1, m.Spell2, seat, true, true, m.IsOwner, m.Nick, m.GUID, true)
+			pi = EncodePIExtra(m.Hero, m.Skin, m.Spell1, m.Spell2, seat, true, true, m.IsOwner, m.Nick, m.GUID, true, m.Extra)
 		}
 		if seat == 0 {
 			body = append(body, pi...)

@@ -69,8 +69,9 @@ Additional V3 profile validation covered:
 - stable card-to-tablet targeting across page and equipped views, without opening a different tablet;
 - inventory persistence after leaving and reopening the relevant UI;
 - (server-v0.1.4, Nox against the public server) the rune counter staying at its true value after Emblem purchases in the shop and after returning from a match, while the shop and hero-select catalogs still load after a cold start and after an in-game logout/re-login.
+- (server-v0.1.5, Nox against the public server) deleting a backpack tablet removes exactly the tapped tablet; reopening a locked tablet with the Rune option and with the Emblem option; an Emblem Pack bought with Runes crediting Emblems; a potion appearing in the Items tab; a purchased pole and banner selectable in the Flags screen, Save succeeding, the selection surviving re-login and a shop purchase; the Flags tab opening without a spinner; and, in a custom-room match, the equipped tablet's passive and the selected battle banner being present.
 
-The matching V1 suite verifies valid-zero handling, deterministic talent clamping, idempotent account migration, authoritative inventory replay, atomic exchange, rejection of mixed or insufficient source inventories, idempotent tablet reopen, stable packet-index round trips, and duplicate equipped-tablet normalization.
+The matching V1 suite verifies valid-zero handling, deterministic talent clamping, idempotent account migration, authoritative inventory replay, atomic exchange, rejection of mixed or insufficient source inventories, idempotent tablet reopen, owned-index round trips, delete request field order, typed purchases and pack expansion, one-shot inventory migration, flag ownership blob layout, guild-login-complete children, PlayerInfo flat indexes, and duplicate equipped-tablet normalization.
 
 ### Physical phone over WAN — V4
 

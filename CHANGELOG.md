@@ -1,5 +1,19 @@
 # Changelog
 
+## server-v0.1.5 — 2026-09-14
+
+### Inventory v1: tablets, shop purchases, flags, in-match passives
+
+- Kitabe: the server now addresses tablets in the client's own index space (position in the owned tablet vector, carried in `TabletSlot[4][0]`), so reopen (unlock) and delete act on the tablet the player tapped; the 0x53 delete request is read from its real field.
+- Kitabe: the reopen dialog accepts the Rune option (20) as well as 750 Emblem, and the prices are sent explicitly in GetUserInfo.
+- Kitabe: delete removes the tablet from the per-account owned list (inscriptions return to the inventory); a deleted tablet can be bought again. Equipped tablets no longer appear as locked duplicates in the backpack.
+- Shop: purchases are routed by prototype type from a generated item catalog. Bundles hand out their real contents; Emblem/Rune rows credit the wallet; consumables land in the ItemInfo inventory; poles and banners are owned in the Flags screen. The debit is the request's line total (multi-count banner packs are charged once).
+- Shop: accounts that bought any of these before this release are migrated once (`inventory_version=1`); everything previously stored in the inscription map is converted to what was actually purchased.
+- Flags: every BuyItem/BuyItemCRM reply carries the flag ownership block the client assigns unconditionally, GetUserInfo carries it at login, SelectFlag persists the choice and replies with a success result, and in-match UseFlag consumes one banner charge.
+- Flags: the Flags tab no longer hangs on a spinner — the post-login lobby push carries every child the client's guild-login handler requires.
+- Match: LoadMap PlayerInfo now carries the awake tablets with their socketed inscriptions, the most-invested talent page, and the selected pole/banner (with charge count), so tablet passives and the battle banner exist in the match.
+- Regression coverage for owned-index round trips, rune/emblem reopen, delete field order, typed purchases and pack expansion, migration idempotence, flag blob layout, guild-login-complete children, and PlayerInfo flat indexes.
+
 ## server-v0.1.4 — 2026-09-13
 
 ### Wallet display and post-login bootstrap fixes

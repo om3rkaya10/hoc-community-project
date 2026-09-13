@@ -2,7 +2,6 @@ package kitabe
 
 import (
 	"fmt"
-	"sort"
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/wire/msgpack"
@@ -13,31 +12,6 @@ const (
 	SlotEmptyOpen = 1
 	SlotLocked    = 2
 )
-
-func TabletItemIDs() []int {
-	ids := []int{453, 464, 465}
-	for i := 467; i <= 479; i++ {
-		ids = append(ids, i)
-	}
-	for i := 536; i <= 543; i++ {
-		ids = append(ids, i)
-	}
-	for i := 556; i <= 561; i++ {
-		ids = append(ids, i)
-	}
-	for i := 600; i <= 605; i++ {
-		ids = append(ids, i)
-	}
-	for i := 649; i <= 654; i++ {
-		ids = append(ids, i)
-	}
-	ids = append(ids, 673, 674)
-	for i := 822; i <= 825; i++ {
-		ids = append(ids, i)
-	}
-	ids = append(ids, 872, 873)
-	return ids
-}
 
 func inscriptionInfo(itemID, qty int, owned bool) []byte {
 	var out []byte
@@ -143,8 +117,12 @@ func InscriptionMap(pairs [][4]int) []byte {
 	return out
 }
 
-func OwnedTabletsVector(sockets map[int]map[int][2]int, awake map[int]bool) []byte {
-	ids := TabletItemIDs()
+// OwnedTabletsVector is the backpack (UserInfo+0xB4C vector<TabletInfo>).
+// Its order is the client's tablet index space: TabletSlot[5]
+// (indexIDInPacket) and the sleep/delete/wake requests all refer to a
+// position in this vector, so callers must pass the account's OwnedTabletIDs
+// unchanged.
+func OwnedTabletsVector(ids []int, sockets map[int]map[int][2]int, awake map[int]bool) []byte {
 	var out []byte
 	out = append(out, msgpack.FixArray(len(ids))...)
 	for _, tid := range ids {
@@ -154,32 +132,25 @@ func OwnedTabletsVector(sockets map[int]map[int][2]int, awake map[int]bool) []by
 	return out
 }
 
-func EquippedTabletAtPacketIndex(equipped map[[2]int]struct {
-	ID      int
-	Sockets map[int][2]int
-}, packetIndex int) (tabletID int, ok bool) {
-	if packetIndex < 0 {
-		return 0, false
-	}
-	keys := make([][2]int, 0, len(equipped))
-	for k, eq := range equipped {
-		if eq.ID > 0 {
-			keys = append(keys, k)
+// OwnedIndexMap maps tablet id → position in the owned vector.
+func OwnedIndexMap(ids []int) map[int]int {
+	out := make(map[int]int, len(ids))
+	for i, id := range ids {
+		if _, dup := out[id]; !dup {
+			out[id] = i
 		}
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i][0] < keys[j][0] || (keys[i][0] == keys[j][0] && keys[i][1] < keys[j][1])
-	})
-	if packetIndex >= len(keys) {
-		return 0, false
-	}
-	return equipped[keys[packetIndex]].ID, true
+	return out
 }
 
+// EquippedSlotsVector is UserInfo+0xB40. TabletSlot[5] carries the owned
+// index of each equipped tablet (DlgTabletPage::RefreshTabletButtonGroup
+// hides that backpack entry and stores the index on the card; the unlock,
+// delete and wake requests send it back).
 func EquippedSlotsVector(equipped map[[2]int]struct {
 	ID      int
 	Sockets map[int][2]int
-}, awake map[int]bool, autoWakeAll bool) []byte {
+}, awake map[int]bool, autoWakeAll bool, ownedIndex map[int]int) []byte {
 	type slot struct {
 		id   int
 		sock map[int][2]int
@@ -205,11 +176,20 @@ func EquippedSlotsVector(equipped map[[2]int]struct {
 	}
 	var out []byte
 	out = append(out, msgpack.FixArray(len(slots))...)
-	for packetIndex, s := range slots {
+	for _, s := range slots {
 		isAwake := autoWakeAll || awake[s.id]
-		out = append(out, tabletSlotWithPacketIndex(SlotFilled, 0, 0, s.id, s.sock, isAwake, packetIndex)...)
+		out = append(out, tabletSlotWithPacketIndex(SlotFilled, 0, 0, s.id, s.sock, isAwake, ownedIndexOf(ownedIndex, s.id))...)
 	}
 	return out
+}
+
+// ownedIndexOf falls back to -1 (the client's "no backpack entry" default)
+// for a tablet that is equipped but missing from the owned vector.
+func ownedIndexOf(ownedIndex map[int]int, tabletID int) int {
+	if idx, ok := ownedIndex[tabletID]; ok {
+		return idx
+	}
+	return -1
 }
 
 func tabletSlot(state, emblemCost, runeCost, itemID int, socks map[int][2]int, awake bool) []byte {
@@ -223,7 +203,11 @@ func tabletSlotWithPacketIndex(state, emblemCost, runeCost, itemID int, socks ma
 	out = append(out, msgpack.Int(int64(state))...)
 	out = append(out, msgpack.Int(int64(emblemCost))...)
 	out = append(out, msgpack.Int(int64(runeCost))...)
-	out = append(out, msgpack.EmptyArray()...)
+	// [4] vector<int>: TabletSlot::getIndexIDInPacket() = getIntVal(0) reads
+	// element 0 of this vector (+0x6c), NOT the trailing [5] int. An empty
+	// vector reads back as 0, i.e. "backpack entry 0".
+	out = append(out, msgpack.FixArray(1)...)
+	out = append(out, msgpack.SignedInt32(int64(packetIndex))...)
 	out = append(out, msgpack.Int(int64(packetIndex))...)
 	return out
 }
@@ -257,26 +241,12 @@ func slotGroup(unlocked bool, slots [][]byte, pageRune, pageEmblem int) []byte {
 func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]struct {
 	ID      int
 	Sockets map[int][2]int
-}, awake map[int]bool, autoWakeAll bool, unlocked map[int]bool, states map[string]int) []byte {
+}, awake map[int]bool, autoWakeAll bool, unlocked map[int]bool, states map[string]int, ownedIndex map[int]int) []byte {
 	if len(unlocked) == 0 {
 		unlocked = map[int]bool{}
 		for page := 1; page <= numPages; page++ {
 			unlocked[page] = true
 		}
-	}
-	packetIndexes := map[[2]int]int{}
-	packetKeys := make([][2]int, 0, len(equipped))
-	for k, eq := range equipped {
-		if eq.ID > 0 {
-			packetKeys = append(packetKeys, k)
-		}
-	}
-	sort.Slice(packetKeys, func(i, j int) bool {
-		return packetKeys[i][0] < packetKeys[j][0] ||
-			(packetKeys[i][0] == packetKeys[j][0] && packetKeys[i][1] < packetKeys[j][1])
-	})
-	for i, k := range packetKeys {
-		packetIndexes[k] = i
 	}
 	var out []byte
 	out = append(out, msgpack.FixMap(numPages)...)
@@ -291,7 +261,7 @@ func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]st
 			} else if ok && eq.ID != 0 {
 				aw := autoWakeAll || awake[eq.ID]
 				slots = append(slots, tabletSlotWithPacketIndex(
-					SlotFilled, 0, 0, eq.ID, eq.Sockets, aw, packetIndexes[[2]int{page0, si}],
+					SlotFilled, 0, 0, eq.ID, eq.Sockets, aw, ownedIndexOf(ownedIndex, eq.ID),
 				))
 			} else if state, exists := states[fmt.Sprintf("%d:%d", page0, si)]; exists {
 				emblemCost, runeCost := 0, 0
@@ -328,11 +298,13 @@ func GESubMember10(a *accounts.Account) []byte {
 	equipped := a.EquippedTablets()
 	socks := a.TabletSockets()
 	aw := awakeSet(a)
+	owned := a.OwnedTabletIDs()
+	idx := OwnedIndexMap(owned)
 	var out []byte
 	out = append(out, msgpack.FixArray(3)...)
 	out = append(out, InscriptionMap(pairs)...)
-	out = append(out, EquippedSlotsVector(equipped, aw, false)...)
-	out = append(out, OwnedTabletsVector(socks, aw)...)
+	out = append(out, EquippedSlotsVector(equipped, aw, false, idx)...)
+	out = append(out, OwnedTabletsVector(owned, socks, aw)...)
 	return out
 }
 
@@ -356,6 +328,8 @@ func UnlockResponseWithResultCallback(a *accounts.Account, result, callbackA, ca
 	equipped := a.EquippedTablets()
 	socks := a.TabletSockets()
 	aw := awakeSet(a)
+	owned := a.OwnedTabletIDs()
+	idx := OwnedIndexMap(owned)
 	unlocked := map[int]bool{}
 	states := map[string]int{}
 	if a != nil {
@@ -368,11 +342,11 @@ func UnlockResponseWithResultCallback(a *accounts.Account, result, callbackA, ca
 	out = append(out, msgpack.Int(int64(emblem))...)
 	out = append(out, msgpack.Int(int64(runeV))...)
 	out = append(out, InscriptionMap(pairs)...)
-	out = append(out, EquippedSlotsVector(equipped, aw, false)...)
-	out = append(out, OwnedTabletsVector(socks, aw)...)
+	out = append(out, EquippedSlotsVector(equipped, aw, false, idx)...)
+	out = append(out, OwnedTabletsVector(owned, socks, aw)...)
 	out = append(out, msgpack.Int(0)...)
 	out = append(out, msgpack.Int(0)...)
-	out = append(out, FullGroups(7, 3, true, equipped, aw, false, unlocked, states)...)
+	out = append(out, FullGroups(7, 3, true, equipped, aw, false, unlocked, states, idx)...)
 	out = append(out, msgpack.Int(int64(callbackA))...)
 	out = append(out, msgpack.Int(int64(callbackB))...)
 	return out

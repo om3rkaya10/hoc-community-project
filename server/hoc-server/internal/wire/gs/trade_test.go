@@ -1,6 +1,7 @@
 package gs_test
 
 import (
+	"encoding/base64"
 	"testing"
 
 	"hoc-server/internal/accounts"
@@ -39,7 +40,7 @@ func TestBuyItemDualOwnershipAndWallet(t *testing.T) {
 		t.Fatal(err)
 	}
 	top := v.([]any)
-	if len(top) != 18 {
+	if len(top) != 20 {
 		t.Fatalf("top len=%d", len(top))
 	}
 	// Client wallet path reads [4]=rune, [5]=emblem (see BuildBuyItem comment).
@@ -83,7 +84,7 @@ func TestBuyItemCustomLightOwnership(t *testing.T) {
 }
 
 func TestUserInfoCarriesRevivalRunes(t *testing.T) {
-	b := wiregs.BuildUserInfo(&accounts.Account{RevivalRunes: 99})
+	b := wiregs.BuildUserInfo(&accounts.Account{Items: map[string]int{"141": 99}})
 	v, err := msgpack.Decode(b)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +100,7 @@ func TestUserInfoCarriesRevivalRunes(t *testing.T) {
 }
 
 func TestBuyItemReplaysRevivalRunes(t *testing.T) {
-	b := wiregs.BuildBuyItem(&accounts.Account{RevivalRunes: 99}, wiregs.BuyItemOptions{
+	b := wiregs.BuildBuyItem(&accounts.Account{Items: map[string]int{"141": 99}}, wiregs.BuyItemOptions{
 		Ownership: true,
 		Kitabe:    true,
 	})
@@ -226,5 +227,67 @@ func TestUserInfoLoginInjectRuneDelta(t *testing.T) {
 	}
 	if iv := dec(wiregs.BuildUserInfoLoginInject(&accounts.Account{})); iv[2] != int64(0) {
 		t.Fatalf("zero rune must not go negative: %v", iv[2])
+	}
+}
+
+func TestBuyItemCarriesFlagOwnership(t *testing.T) {
+	a := &accounts.Account{
+		Poles: map[string]int{"568": 1}, Patterns: map[string]int{"563": 4, "860": 1},
+		FlagPole: 568, FlagPattern: 860, FlagType: 0x11,
+	}
+	b := wiregs.BuildBuyItem(a, wiregs.BuyItemOptions{Ownership: true, Kitabe: true})
+	v, err := msgpack.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top := v.([]any)
+	if top[18] != int64(0) {
+		t.Fatalf("[18]=%v", top[18])
+	}
+	ge := top[19].([]any)
+	if len(ge) != 6 {
+		t.Fatalf("GESub5Member18 len=%d", len(ge))
+	}
+	poles := ge[1].(map[any]any)
+	pole := poles[int64(568)].([]any)
+	if len(pole) != 7 || pole[0] != int64(568) || pole[2] != int64(1) {
+		t.Fatalf("HocPole=%#v", pole)
+	}
+	flags := ge[2].(map[any]any)
+	if flags[int64(563)].([]any)[2] != int64(4) {
+		t.Fatalf("HocFlag 563=%#v", flags[int64(563)])
+	}
+	if ge[3] != int64(568) || ge[4] != int64(860) || ge[5] != int64(0x11) {
+		t.Fatalf("current pole/pattern/type=%v/%v/%v", ge[3], ge[4], ge[5])
+	}
+}
+
+func TestUserInfoCarriesFlagBlobAndSleepPrices(t *testing.T) {
+	a := &accounts.Account{Poles: map[string]int{"568": 1}}
+	b := wiregs.BuildUserInfo(a)
+	v, err := msgpack.Decode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top := v.([]any)
+	iv := top[3].([]any)
+	if iv[0x4f] != int64(config.KitabeSleepEmblem) || iv[0x50] != int64(config.KitabeSleepRune) {
+		t.Fatalf("sleep prices iv[0x4f]=%v iv[0x50]=%v", iv[0x4f], iv[0x50])
+	}
+	strs := top[16].([]any)
+	if len(strs) < 0x13 {
+		t.Fatalf("strvec len=%d", len(strs))
+	}
+	blob := strs[0x12].(string)
+	raw, err := base64.StdEncoding.DecodeString(blob)
+	if err != nil {
+		t.Fatalf("strvec[0x12] not base64: %v", err)
+	}
+	ge, err := msgpack.Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if poles := ge.([]any)[1].(map[any]any); poles[int64(568)] == nil {
+		t.Fatal("pole 568 missing from blob")
 	}
 }

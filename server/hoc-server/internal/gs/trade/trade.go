@@ -7,6 +7,7 @@ import (
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/config"
+	"hoc-server/internal/domain/items"
 	"hoc-server/internal/domain/kitabe"
 	"hoc-server/internal/domain/talent"
 	"hoc-server/internal/session"
@@ -63,6 +64,7 @@ func init() {
 	registry[0x3b] = handleTalentOp
 	registry[0x3c] = handleTalentOp
 	registry[0x5c] = handleSelectFlag
+	registry[0x5b] = handleUseFlag
 	registry[0x5d] = handleExpandTablet
 	registry[0x70] = handleNickname
 	registry[0x6e] = handleBuyItemCRM
@@ -357,32 +359,29 @@ func parseTalentInfos(arr []any, start int) [][]int {
 	return nil
 }
 
+// handleSelectFlag — trade 0x5c (UserInfo::SendSelectFlagRequest @0xc21808):
+// [26, name, pattern, pole, type(0x11 normal / 0x12 guild), uid].
 func handleSelectFlag(c *Ctx) bool {
-	pole, pattern, flagType := 0, 0, 0x11
+	a := acc(c)
+	pole, pattern, flagType := a.FlagSelection()
 	if rq, err := msgpack.Decode(c.Body); err == nil {
-		if arr, ok := rq.([]any); ok {
-			if len(arr) >= 4 {
-				if tag, ok := asInt(arr[0]); ok && (tag == 0x1a || tag == 26) {
-					pole, _ = asInt(arr[1])
-					pattern, _ = asInt(arr[2])
-					if v, ok := asInt(arr[3]); ok && v != 0 {
-						flagType = v
-					}
-				} else if len(arr) >= 3 {
-					pole, _ = asInt(arr[0])
-					pattern, _ = asInt(arr[1])
-					if v, ok := asInt(arr[2]); ok && v != 0 {
-						flagType = v
-					}
-				}
-			} else if len(arr) >= 3 {
-				pole, _ = asInt(arr[0])
-				pattern, _ = asInt(arr[1])
-				if v, ok := asInt(arr[2]); ok && v != 0 {
-					flagType = v
-				}
+		if arr, ok := rq.([]any); ok && len(arr) >= 5 {
+			if v, ok := asInt(arr[2]); ok {
+				pattern = v
+			}
+			if v, ok := asInt(arr[3]); ok {
+				pole = v
+			}
+			if v, ok := asInt(arr[4]); ok && v != 0 {
+				flagType = v
 			}
 		}
+	}
+	if flagType == 0 {
+		flagType = 0x11
+	}
+	if a != nil {
+		a.SetFlagSelection(pole, pattern, flagType)
 	}
 	body := wiregs.SelectFlagResponse(pole, pattern, flagType)
 	c.Send(0x5c, body)
@@ -443,8 +442,35 @@ func handleNickname(c *Ctx) bool {
 	return true
 }
 
+// handleUseFlag — trade 0x5b from Unit::CostOutGameBanner:
+// [26, name, patternID (Object u32 0x56), 1, false, uid]. One banner charge
+// is consumed; no S2C reply is expected.
+func handleUseFlag(c *Ctx) bool {
+	a := acc(c)
+	if a == nil {
+		return true
+	}
+	patternID := 0
+	if rq, err := msgpack.Decode(c.Body); err == nil {
+		if arr, ok := rq.([]any); ok && len(arr) >= 3 {
+			if v, ok := asInt(arr[2]); ok && items.IsPattern(v) {
+				patternID = v
+			}
+		}
+	}
+	if patternID == 0 {
+		_, patternID, _ = a.FlagSelection()
+	}
+	a.UsePattern(patternID)
+	fmt.Printf(" [GS] ★UseFlag 0x5b pattern=%d left=%d\n", patternID, a.PatternCounts()[patternID])
+	return true
+}
+
 func handleBuyItemCRM(c *Ctx) bool {
 	a := acc(c)
+	// [2] item, [3] qty, [4] payType, [5] line total, [6] unit price. A 50-pack
+	// of banners arrives as qty=50 with [5] = the pack price, so the debit is
+	// the line total, never unit×qty.
 	itemID, qty, payType, price := 0, 1, 5, 0
 	if rq, err := msgpack.Decode(c.Body); err == nil {
 		if arr, ok := rq.([]any); ok && len(arr) >= 7 {
@@ -460,16 +486,17 @@ func handleBuyItemCRM(c *Ctx) bool {
 			}
 		}
 	}
+	granted := false
 	if a != nil {
-		a.PurchaseCRM(itemID, qty, payType, price)
+		granted = a.Purchase(itemID, qty, payType, price)
 	}
 	body := wiregs.BuildBuyItem(a, wiregs.BuyItemOptions{
 		Ownership: true,
 		Kitabe:    config.ServerKitabe,
 	})
 	c.Send(0x6e, body)
-	fmt.Printf(" [GS SENT] ★BuyItemCRM 0x6e item=%d qty=%d pay=%d price=%d (%dB)\n",
-		itemID, qty, payType, price, len(body))
+	fmt.Printf(" [GS SENT] ★BuyItemCRM 0x6e item=%d(%s type=%d) qty=%d pay=%d price=%d granted=%v (%dB)\n",
+		itemID, items.Name(itemID), items.TypeOf(itemID), qty, payType, price, granted, len(body))
 	return true
 }
 
@@ -493,6 +520,9 @@ func handleKitabeFamily(c *Ctx) bool {
 			result, tabletID, payType, ownedIndex, len(body))
 		return true
 	}
+	if c.Sub == 0x53 || c.Sub == 0x4b || c.Sub == 0x4c || c.Sub == 0x4d {
+		fmt.Printf(" [GS] kitabe %#x body=%x owned=%v\n", c.Sub, c.Body, a.OwnedTabletIDs())
+	}
 	applyKitabeMutation(c.Sub, c.Body, a)
 	body := kitabe.UnlockResponse(a)
 	c.Send(c.Sub, body)
@@ -500,6 +530,12 @@ func handleKitabeFamily(c *Ctx) bool {
 	return true
 }
 
+// handleSleepTablet — trade 0x4e (UserInfo::SendSleepTabletRequest):
+// [26, name, 1, ownedIndex, payType, uid, page1]. ownedIndex is the tablet's
+// position in the owned TabletInfo vector (TabletButton+0x400, set from
+// TabletSlot::getIndexIDInPacket for equipped cards or the backpack loop
+// index). The reply's [10] is echoed as that index (onSleepTabletResponse
+// reads UserInfo+0xB4C[index]).
 func handleSleepTablet(body []byte, a *accounts.Account) (result, payType, ownedIndex, tabletID int) {
 	result = 1
 	if a == nil || len(body) == 0 {
@@ -513,26 +549,29 @@ func handleSleepTablet(body []byte, a *accounts.Account) (result, payType, owned
 	if !ok || len(arr) < 5 {
 		return result, payType, ownedIndex, tabletID
 	}
-	packetIndex, ok := asInt(arr[3])
+	index, ok := asInt(arr[3])
 	if !ok {
 		return result, payType, ownedIndex, tabletID
 	}
 	payType, _ = asInt(arr[4])
-	if payType != 5 {
+	cost := 0
+	switch payType {
+	case accounts.PayEmblem:
+		cost = config.KitabeSleepEmblem
+	case accounts.PayRune:
+		cost = config.KitabeSleepRune
+	default:
+		fmt.Printf(" [GS] ★0x4e SLEEP rejected payType=%d\n", payType)
 		return result, payType, ownedIndex, tabletID
 	}
-	tabletID, ok = kitabe.EquippedTabletAtPacketIndex(a.EquippedTablets(), packetIndex)
+	tabletID, ok = a.OwnedTabletAt(index)
 	if !ok {
+		fmt.Printf(" [GS] ★0x4e SLEEP rejected index=%d owned=%d body=%x\n", index, len(a.OwnedTabletIDs()), body)
 		return result, payType, ownedIndex, tabletID
 	}
-	found := false
-	for i, id := range kitabe.TabletItemIDs() {
-		if id == tabletID {
-			ownedIndex, found = i, true
-			break
-		}
-	}
-	if !found || !a.SleepTabletWithEmblem(tabletID, 750) {
+	ownedIndex = index
+	if !a.SleepTablet(tabletID, payType, cost) {
+		fmt.Printf(" [GS] ★0x4e SLEEP rejected tablet=%d pay=%d cost=%d insufficient\n", tabletID, payType, cost)
 		return result, payType, ownedIndex, tabletID
 	}
 	return 0, payType, ownedIndex, tabletID
@@ -584,7 +623,7 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 		return
 	}
 	page0 := a.SelectedPage0()
-	ids := kitabe.TabletItemIDs()
+	ids := a.OwnedTabletIDs()
 
 	switch sub {
 	case 0x50:
@@ -629,27 +668,39 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 			a.UnequipTablet(page, *slot)
 			fmt.Printf(" [GS] ★0x4c UNEQUIP page=%d slot=%d\n", page, *slot)
 		}
-	case 0x4d, 0x4e:
-		page, slot, _ := kitabeWirePageSlot(arr, page0, "sleep")
-		a.SetSelectedPage(page + 1)
+	case 0x4d:
+		// SendWakeTabletRequest: [26, name, slotIdx, ownedIndex, page1, uid]
+		// (field order not yet captured live — the normal flow wakes through
+		// 0x4b — so accept whichever of [2]/[3] names an equipped tablet).
 		tid := 0
-		eq := a.EquippedTablets()
-		if slot != nil {
-			if e, ok := eq[[2]int{page, *slot}]; ok {
-				tid = e.ID
-			}
+		equippedIDs := map[int]bool{}
+		for _, e := range a.EquippedTablets() {
+			equippedIDs[e.ID] = true
 		}
-		if tid == 0 {
-			for candidate := 0; candidate < 3; candidate++ {
-				if e, ok := eq[[2]int{page, candidate}]; ok && e.ID != 0 {
-					tid = e.ID
+		for _, pos := range []int{3, 2} {
+			if len(arr) > pos {
+				if idx, ok := asInt(arr[pos]); ok && idx >= 0 && idx < len(ids) && equippedIDs[ids[idx]] {
+					tid = ids[idx]
 					break
 				}
 			}
 		}
+		if len(arr) > 4 {
+			if v, ok := asInt(arr[4]); ok && v >= 1 && v <= 7 {
+				a.SetSelectedPage(v)
+				page0 = v - 1
+			}
+		}
+		if tid == 0 {
+			if slot, ok := asInt(arrElem(arr, 2)); ok {
+				if e, ok := a.EquippedTablets()[[2]int{page0, slot}]; ok {
+					tid = e.ID
+				}
+			}
+		}
 		if tid != 0 {
-			a.SetTabletAwake(tid, sub == 0x4d)
-			fmt.Printf(" [GS] ★%#x WAKE/SLEEP tid=%d\n", sub, tid)
+			a.SetTabletAwake(tid, true)
+			fmt.Printf(" [GS] ★0x4d WAKE tid=%d\n", tid)
 		}
 	case 0x4a:
 		if len(arr) >= 3 {
@@ -716,21 +767,25 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 			fmt.Printf(" [GS] ★0x52 DELETE_INSC id=%d qty=%d\n", iid, qty)
 		}
 	case 0x53:
-		page, slot, idx := kitabeWirePageSlot(arr, page0, "delete")
-		a.SetSelectedPage(page + 1)
+		// SendDeleteTabletRequest, live capture 2026-09-13:
+		// [26, name, ownedIndex, 1, uid, page1] — unlike 0x4e the index is
+		// packed before the constant 1.
 		tid := 0
-		eq := a.EquippedTablets()
-		if slot != nil {
-			if e, ok := eq[[2]int{page, *slot}]; ok {
-				tid = e.ID
+		if len(arr) > 2 {
+			if idx, ok := asInt(arr[2]); ok && idx >= 0 && idx < len(ids) {
+				tid = ids[idx]
 			}
 		}
-		if tid == 0 && idx != nil && *idx >= 0 && *idx < len(ids) {
-			tid = ids[*idx]
+		if len(arr) > 5 {
+			if v, ok := asInt(arr[5]); ok && v >= 1 && v <= 7 {
+				a.SetSelectedPage(v)
+			}
 		}
 		if tid != 0 {
 			a.DeleteTablet(tid)
-			fmt.Printf(" [GS] ★0x53 DELETE_TABLET id=%d\n", tid)
+			fmt.Printf(" [GS] ★0x53 DELETE_TABLET id=%d index=%v\n", tid, arr[2])
+		} else {
+			fmt.Printf(" [GS] ★0x53 DELETE_TABLET rejected body=%x\n", body)
 		}
 	}
 }
@@ -773,21 +828,6 @@ func kitabeWirePageSlot(rq []any, defaultPage0 int, mode string) (page int, slot
 		page = *trail
 	}
 	switch mode {
-	case "sleep":
-		if b != nil && *b >= 0 && *b <= 2 {
-			slot = b
-		} else if a >= 0 && a <= 2 {
-			slot = &a
-		}
-		return page, slot, nil
-	case "delete":
-		if a >= 0 && a <= 2 {
-			slot = &a
-			idx = &a
-			return page, slot, idx
-		}
-		idx = &a
-		return page, nil, idx
 	case "insc":
 		if a >= 0 && a <= 2 {
 			slot = &a

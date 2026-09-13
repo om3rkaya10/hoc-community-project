@@ -259,6 +259,19 @@ func KeepaliveReply() []byte {
 	return PackPacket(0x2105, nil)
 }
 
-func FlagsGLSReady() []byte {
-	return PackPacket(0x6000, []Child{{0x0203, TypeString, []byte("flags")}})
+// GuildLoginComplete is the S2C 0x6000 push
+// (GLXComponentMPLobby::HandleGuildLoginComplete @0x21f56b0). The event is
+// only dispatched when all five children are present; LobbySession then
+// copies 0x1505 (guild id) into GLonlineSession+0xa0 / UserInfo+0xee4 and, for
+// a non-guild id, sends ListInviteGuild and sets GLonlineSession+0xa4=1 — the
+// second gate of DlgLgmMainMenuUserFlagsImpl::CheckDataStatusShowUI (the
+// flags tab spinner). Guilds are not served, so the id stays empty.
+func GuildLoginComplete() []byte {
+	return PackPacket(0x6000, []Child{
+		{0xff00, TypeInt, IntBE(0)},
+		{0x150b, TypeString, nil},
+		{0x150d, TypeInt, IntBE(0)},
+		{0x1505, TypeString, nil},
+		{0x150a, TypeString, nil},
+	})
 }

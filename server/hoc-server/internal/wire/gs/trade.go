@@ -1,7 +1,9 @@
 package gs
 
 import (
+	"encoding/base64"
 	"encoding/binary"
+	"sort"
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/config"
@@ -9,8 +11,6 @@ import (
 	"hoc-server/internal/domain/talent"
 	"hoc-server/internal/wire/msgpack"
 )
-
-const revivalRuneItemID = 141 // Item_Prototype: "Revival Rune" / Canlandırma Runiği
 
 func itemInfo(itemID, quantity int) []byte {
 	var out []byte
@@ -27,15 +27,79 @@ func itemInfo(itemID, quantity int) []byte {
 	return out
 }
 
+// inventoryVector is the consumable ItemInfo inventory (GetUserInfo[7] /
+// BuyItem[13]); UserInfo::getItemCount reads it for shop own-counts and the
+// bag's item tab.
 func inventoryVector(a *accounts.Account) []byte {
-	quantity := 99
-	if a != nil && a.RevivalRunes > 0 {
-		quantity = a.RevivalRunes
+	counts := a.ItemCounts()
+	ids := make([]int, 0, len(counts))
+	for id := range counts {
+		ids = append(ids, id)
 	}
+	sort.Ints(ids)
 	var out []byte
-	out = append(out, msgpack.FixArray(1)...)
-	out = append(out, itemInfo(revivalRuneItemID, quantity)...)
+	out = append(out, msgpack.FixArray(len(ids))...)
+	for _, id := range ids {
+		out = append(out, itemInfo(id, counts[id])...)
+	}
 	return out
+}
+
+// hocPole encodes HocPole / HocFlag (7-elem, define_array<i,Ss,i,Ss,i,vec<int>,vec<Ss>>
+// @0xc7b4cc): [2] is the count UserInfo::HasPole / GetPatternCount read.
+func hocPole(itemID, count int) []byte {
+	var out []byte
+	out = append(out, msgpack.FixArray(7)...)
+	out = append(out, msgpack.Int(int64(itemID))...)
+	out = append(out, msgpack.RawStr(nil)...)
+	out = append(out, msgpack.Int(int64(count))...)
+	out = append(out, msgpack.RawStr(nil)...)
+	out = append(out, msgpack.Int(0)...)
+	out = append(out, msgpack.EmptyArray()...)
+	out = append(out, msgpack.EmptyArray()...)
+	return out
+}
+
+func hocPoleMap(counts map[int]int) []byte {
+	ids := make([]int, 0, len(counts))
+	for id, n := range counts {
+		if id > 0 && n > 0 {
+			ids = append(ids, id)
+		}
+	}
+	sort.Ints(ids)
+	var out []byte
+	out = append(out, msgpack.FixMap(len(ids))...)
+	for _, id := range ids {
+		out = append(out, msgpack.Int(int64(id))...)
+		out = append(out, hocPole(id, counts[id])...)
+	}
+	return out
+}
+
+// GESub5Member18 is the flag ownership blob (unpack @0xc79f28):
+// [0] achievements map<str,map<str,str>>, [1] map<int,HocPole> → UserInfo+0xB70,
+// [2] map<int,HocFlag> → +0xB88, [3] current pole → +0xBA0, [4] current
+// pattern → +0xBA8, [5] flag type → +0xBB0. The BuyItem handler
+// (DispatchTradeMsg @0x1281b58) assigns all of these unconditionally, so every
+// BuyItem reply must carry it at [19] or the client forgets its flags.
+func GESub5Member18(a *accounts.Account) []byte {
+	pole, pattern, flagType := a.FlagSelection()
+	var out []byte
+	out = append(out, msgpack.FixArray(6)...)
+	out = append(out, msgpack.EmptyMap()...)
+	out = append(out, hocPoleMap(a.PoleCounts())...)
+	out = append(out, hocPoleMap(a.PatternCounts())...)
+	out = append(out, msgpack.Int(int64(pole))...)
+	out = append(out, msgpack.Int(int64(pattern))...)
+	out = append(out, msgpack.Int(int64(flagType))...)
+	return out
+}
+
+// GESub5Member18B64 is the GetUserInfo strvec[0x12] form
+// (UserInfo::clientParseGEMember18 @0xc1cc98: DecodeBase64 → msgpack).
+func GESub5Member18B64(a *accounts.Account) []byte {
+	return []byte(base64.StdEncoding.EncodeToString(GESub5Member18(a)))
 }
 
 // BuildUserInfo — trade sub1. Talent map at [14] when SERVER_TALENT (wipe-safe).
@@ -93,6 +157,8 @@ func buildUserInfo(a *accounts.Account, runeAdj int) []byte {
 	iv[3] = int64(emblem)
 	iv[0x28] = int64(talentPts)
 	iv[0x88] = int64(tabletPkt)
+	iv[0x4f] = int64(config.KitabeSleepEmblem) // getUserSleepTabletEmblem
+	iv[0x50] = int64(config.KitabeSleepRune)   // getUserSleepTabletRune
 	iv[0x10b] = int64(selGroup)
 	iv[244] = int64(gems)
 	age, gender, saved := accounts.DefaultAge, accounts.DefaultGender, 1
@@ -114,9 +180,10 @@ func buildUserInfo(a *accounts.Account, runeAdj int) []byte {
 	for _, x := range iv {
 		intvec = append(intvec, msgpack.Int(x)...)
 	}
-	strSlots := make([][]byte, 10)
+	strSlots := make([][]byte, 0x13)
 	strSlots[7] = []byte(user)
 	strSlots[9] = []byte(nick)
+	strSlots[0x12] = GESub5Member18B64(a) // getGESubMember18 = getStrVal(0x12)
 	var strvec []byte
 	strvec = append(strvec, msgpack.FixArray(len(strSlots))...)
 	for _, s := range strSlots {
@@ -213,7 +280,7 @@ func BuildBuyItem(a *accounts.Account, opts BuyItemOptions) []byte {
 	withKitabe := config.ServerKitabe && opts.Kitabe
 	n := 13
 	if withKitabe {
-		n = 18
+		n = 20
 	}
 	var out []byte
 	out = append(out, msgpack.FixArray(n)...)
@@ -238,6 +305,8 @@ func BuildBuyItem(a *accounts.Account, opts BuyItemOptions) []byte {
 		out = append(out, msgpack.EmptyArray()...)
 		out = append(out, msgpack.EmptyArray()...)
 		out = append(out, kitabe.GESubMember10(a)...)
+		out = append(out, msgpack.Int(0)...)    // [18]
+		out = append(out, GESub5Member18(a)...) // [19] flags (assigned unconditionally)
 	}
 	return out
 }
@@ -275,17 +344,21 @@ func TradeAchievementAck(name []byte) []byte {
 	return out
 }
 
-// SelectFlagResponse — trade 0x5c (RE: pattern, pole, type, str).
+// SelectFlagResponse — trade 0x5c. TradeMessageSelectFlagResponse is
+// define_array<int,string,int,int,int> (unpack @0x12c5e40): [0] result (0 =
+// ok, else "process failed"), [1] string, [2] pattern → UserInfo+0xBA8,
+// [3] pole → +0xBA0, [4] flag type → +0xBB0 (handler @0x1287444).
 func SelectFlagResponse(pole, pattern, flagType int) []byte {
 	if flagType != 0x11 && flagType != 0x12 {
 		flagType = 0x11
 	}
 	var out []byte
-	out = append(out, msgpack.FixArray(4)...)
+	out = append(out, msgpack.FixArray(5)...)
+	out = append(out, msgpack.Int(0)...)
+	out = append(out, msgpack.RawStr(nil)...)
 	out = append(out, msgpack.Int(int64(pattern))...)
 	out = append(out, msgpack.Int(int64(pole))...)
 	out = append(out, msgpack.Int(int64(flagType))...)
-	out = append(out, msgpack.RawStr(nil)...)
 	return out
 }
 

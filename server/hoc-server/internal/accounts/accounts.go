@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"hoc-server/internal/config"
+	"hoc-server/internal/domain/items"
 )
 
 const (
@@ -75,6 +76,21 @@ type Account struct {
 	Talents             map[string]TalentGroupRec   `json:"talents"`
 	SelectedTabletGroup int                         `json:"selected_tablet_group"`
 	AwakeTabletIDs      []int                       `json:"awake_tablets"`
+
+	// Inventory v1 (2026-09-13). Items is the ItemInfo consumable inventory
+	// (GetUserInfo[7] / BuyItem[13]); OwnedTablets is the Kitabe backpack in
+	// wire order — the client addresses tablets by their index in this vector
+	// (TabletSlot indexIDInPacket, sleep/delete/wake requests). Poles and
+	// Patterns feed GESub5Member18 (HocPole/HocFlag maps); Flag* is the
+	// SelectFlag choice. InventoryVersion gates the one-shot migration.
+	Items            map[string]int `json:"items"`
+	OwnedTablets     []int          `json:"owned_tablets"`
+	Poles            map[string]int `json:"poles"`
+	Patterns         map[string]int `json:"patterns"`
+	FlagPole         int            `json:"flag_pole"`
+	FlagPattern      int            `json:"flag_pattern"`
+	FlagType         int            `json:"flag_type"`
+	InventoryVersion int            `json:"inventory_version"`
 }
 
 type storeFile struct {
@@ -131,11 +147,10 @@ func Load(path string) error {
 			a.TalentPoints = config.TalentPointsDefault
 			dirty = true
 		}
-		if a.RevivalRunes <= 0 {
-			a.RevivalRunes = 99
+		if a.normalizeDuplicateTabletsLocked() {
 			dirty = true
 		}
-		if a.normalizeDuplicateTabletsLocked() {
+		if a.migrateInventoryLocked() {
 			dirty = true
 		}
 		if a.ensureAgeGateLocked() {
@@ -469,6 +484,7 @@ func newTemporaryAccountLocked(username, nickname, password string, device bool)
 		Inscriptions: map[string]int{}, Tablets: map[string]TabletRec{},
 		BackpackSockets: map[string]map[string][]int{}, Talents: map[string]TalentGroupRec{},
 	}
+	a.migrateInventoryLocked()
 	return a
 }
 
@@ -1113,6 +1129,8 @@ func (a *Account) SetTabletAwake(tabletID int, awake bool) {
 	})
 }
 
+// DeleteTablet handles trade 0x53: unequip, return socketed inscriptions and
+// drop the tablet from the backpack (it can be bought again from the shop).
 func (a *Account) DeleteTablet(tabletID int) {
 	if a == nil || tabletID <= 0 {
 		return
@@ -1139,7 +1157,18 @@ func (a *Account) DeleteTablet(tabletID int) {
 			}
 		}
 		removeAwakeLocked(a, tabletID)
+		removeOwnedTabletLocked(a, tabletID)
 	})
+}
+
+func removeOwnedTabletLocked(a *Account, tabletID int) {
+	out := make([]int, 0, len(a.OwnedTablets))
+	for _, id := range a.OwnedTablets {
+		if id != tabletID {
+			out = append(out, id)
+		}
+	}
+	a.OwnedTablets = out
 }
 
 func (a *Account) UnlockSlot(page, slot int) {
@@ -1180,6 +1209,12 @@ func (a *Account) UnlockPage(page int) []int {
 // SleepTabletWithEmblem atomically charges the unlock cost and removes one
 // tablet from the awake set. Repeating an already-completed sleep is idempotent.
 func (a *Account) SleepTabletWithEmblem(tabletID, cost int) bool {
+	return a.SleepTablet(tabletID, PayEmblem, cost)
+}
+
+// SleepTablet is SleepTabletWithEmblem for either currency the client offers
+// in its reopen dialog (PayEmblem or PayRune).
+func (a *Account) SleepTablet(tabletID, payType, cost int) bool {
 	if a == nil || tabletID <= 0 || cost < 0 {
 		return false
 	}
@@ -1189,10 +1224,20 @@ func (a *Account) SleepTabletWithEmblem(tabletID, cost int) bool {
 	if !awake[tabletID] {
 		return true
 	}
-	if a.Emblem < cost {
+	switch payType {
+	case PayEmblem:
+		if a.Emblem < cost {
+			return false
+		}
+		a.Emblem -= cost
+	case PayRune:
+		if a.Rune < cost {
+			return false
+		}
+		a.Rune -= cost
+	default:
 		return false
 	}
-	a.Emblem -= cost
 	removeAwakeLocked(a, tabletID)
 	_ = saveLocked()
 	return true
@@ -1215,31 +1260,315 @@ func (a *Account) Debit(payType, amount int) (emblem, runeV, gems int) {
 	return a.Wallet()
 }
 
-func (a *Account) PurchaseCRM(itemID, qty, payType, unitPrice int) (emblem, runeV, gems int) {
+// PayEmblem / PayRune are the BuyMethod codes shared by the shop (0x6e), the
+// Kitabe reopen dialog (0x4e) and page unlock (0x7c).
+const (
+	PayRune   = 2
+	PayEmblem = 5
+)
+
+const revivalRuneItemID = 141
+
+// Purchase debits total from the wallet and grants qty of the shop item by
+// prototype type. Unsupported or already-owned unique items are not charged
+// (ok=false) so the BuyItem reply carries an unchanged wallet.
+func (a *Account) Purchase(itemID, qty, payType, total int) (ok bool) {
+	if a == nil || itemID <= 0 {
+		return false
+	}
 	if qty < 1 {
 		qty = 1
 	}
-	if unitPrice < 0 {
-		unitPrice = 0
+	if total < 0 {
+		total = 0
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !a.canGrantLocked(itemID) {
+		return false
+	}
+	debit := total
+	switch payType {
+	case PayEmblem:
+		a.Emblem = maxInt(0, a.Emblem-debit)
+	case PayRune:
+		a.Rune = maxInt(0, a.Rune-debit)
+	case 1, 3, 4:
+		a.Gems = maxInt(0, a.Gems-debit)
+	}
+	a.grantLocked(itemID, qty, 0)
+	_ = saveLocked()
+	return true
+}
+
+// Grant adds an item to the account without charging (rewards, migration).
+func (a *Account) Grant(itemID, qty int) bool {
+	if a == nil || itemID <= 0 {
+		return false
+	}
+	if qty < 1 {
+		qty = 1
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !a.canGrantLocked(itemID) {
+		return false
+	}
+	a.grantLocked(itemID, qty, 0)
+	_ = saveLocked()
+	return true
+}
+
+func (a *Account) canGrantLocked(itemID int) bool {
+	switch items.TypeOf(itemID) {
+	case items.TypeInscription, items.TypeConsumable, items.TypePole, items.TypePattern,
+		items.TypePack, items.TypeEmblemCurrency, items.TypeRuneCurrency, items.TypeGemCurrency,
+		items.TypeHero:
+		return true
+	case items.TypeTablet:
+		return ownedTabletIndexLocked(a, itemID) < 0
+	default:
+		return false
+	}
+}
+
+// grantLocked routes one item into the matching inventory. Packs expand
+// recursively (depth-limited); currency rows credit the wallet.
+func (a *Account) grantLocked(itemID, qty, depth int) {
+	if qty < 1 || depth > 4 {
+		return
+	}
+	key := strconv.Itoa(itemID)
+	switch items.TypeOf(itemID) {
+	case items.TypeInscription:
+		if a.Inscriptions == nil {
+			a.Inscriptions = map[string]int{}
+		}
+		a.Inscriptions[key] += qty
+	case items.TypeConsumable:
+		if a.Items == nil {
+			a.Items = map[string]int{}
+		}
+		a.Items[key] += qty
+	case items.TypeTablet:
+		if ownedTabletIndexLocked(a, itemID) < 0 {
+			a.OwnedTablets = append(a.OwnedTablets, itemID)
+		}
+	case items.TypePole:
+		if a.Poles == nil {
+			a.Poles = map[string]int{}
+		}
+		a.Poles[key] += qty
+	case items.TypePattern:
+		if a.Patterns == nil {
+			a.Patterns = map[string]int{}
+		}
+		if items.PatternUnlimited(itemID) {
+			a.Patterns[key] = 1
+		} else {
+			a.Patterns[key] += qty
+		}
+	case items.TypePack:
+		it, _ := items.Lookup(itemID)
+		for _, p := range it.Pack {
+			a.grantLocked(p.ID, p.Count*qty, depth+1)
+		}
+	case items.TypeEmblemCurrency, items.TypeRuneCurrency, items.TypeGemCurrency:
+		typ, amount, _ := items.CurrencyAmount(itemID)
+		switch typ {
+		case items.TypeEmblemCurrency:
+			a.Emblem += amount * qty
+		case items.TypeRuneCurrency:
+			a.Rune += amount * qty
+		case items.TypeGemCurrency:
+			a.Gems += amount * qty
+		}
+	case items.TypeHero:
+		if a.Heroes == nil {
+			return // full collection already owns every hero
+		}
+		for _, h := range a.Heroes {
+			if h == itemID {
+				return
+			}
+		}
+		a.Heroes = append(a.Heroes, itemID)
+	}
+}
+
+// migrateInventoryLocked brings pre-inventory-v1 records forward:
+//   - Items seeded from the legacy revival_runes counter;
+//   - OwnedTablets seeded with the grant list (everything equipped stays owned);
+//   - non-inscription ids that earlier builds stored in Inscriptions
+//     (emblem packs, banners, poles, potions, bundles) are re-routed through
+//     grantLocked so players receive what they paid for.
+func (a *Account) migrateInventoryLocked() bool {
+	if a == nil {
+		return false
+	}
+	dirty := false
+	if a.Items == nil {
+		a.Items = map[string]int{}
+		n := a.RevivalRunes
+		if n <= 0 {
+			n = 99
+		}
+		a.Items[strconv.Itoa(revivalRuneItemID)] = n
+		dirty = true
+	}
+	if a.OwnedTablets == nil {
+		a.OwnedTablets = []int{}
+		if config.KitabeGrantAllTablets {
+			a.OwnedTablets = append(a.OwnedTablets, items.GrantableTabletIDs()...)
+		}
+		dirty = true
+	}
+	for _, rec := range a.Tablets {
+		if rec.ID > 0 && ownedTabletIndexLocked(a, rec.ID) < 0 {
+			a.OwnedTablets = append(a.OwnedTablets, rec.ID)
+			dirty = true
+		}
+	}
+	if a.Poles == nil {
+		a.Poles = map[string]int{}
+		dirty = true
+	}
+	if a.Patterns == nil {
+		a.Patterns = map[string]int{}
+		dirty = true
+	}
+	if a.InventoryVersion < 1 {
+		for key, qty := range a.Inscriptions {
+			id, err := strconv.Atoi(key)
+			if err != nil || items.IsInscription(id) {
+				continue
+			}
+			delete(a.Inscriptions, key)
+			if items.TypeOf(id) >= 0 {
+				a.grantLocked(id, qty, 0)
+			}
+			dirty = true
+		}
+		a.InventoryVersion = 1
+		dirty = true
+	}
+	return dirty
+}
+
+func ownedTabletIndexLocked(a *Account, tabletID int) int {
+	for i, id := range a.OwnedTablets {
+		if id == tabletID {
+			return i
+		}
+	}
+	return -1
+}
+
+// OwnedTabletIDs is the Kitabe backpack in wire order (TabletInfo vector).
+func (a *Account) OwnedTabletIDs() []int {
+	if a == nil {
+		return nil
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	return append([]int(nil), a.OwnedTablets...)
+}
+
+// OwnedTabletAt resolves a client-side tablet index (TabletSlot
+// indexIDInPacket / backpack button index) to a tablet id.
+func (a *Account) OwnedTabletAt(index int) (int, bool) {
+	if a == nil || index < 0 {
+		return 0, false
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	if index >= len(a.OwnedTablets) {
+		return 0, false
+	}
+	return a.OwnedTablets[index], true
+}
+
+func (a *Account) OwnedTabletIndex(tabletID int) int {
+	if a == nil {
+		return -1
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	return ownedTabletIndexLocked(a, tabletID)
+}
+
+// ItemCounts returns the consumable inventory (item id → quantity).
+func (a *Account) ItemCounts() map[int]int {
+	out := map[int]int{}
+	if a == nil {
+		out[revivalRuneItemID] = 99
+		return out
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	for k, q := range a.Items {
+		if id, err := strconv.Atoi(k); err == nil && id > 0 && q > 0 {
+			out[id] = q
+		}
+	}
+	return out
+}
+
+func (a *Account) PoleCounts() map[int]int {
+	return a.countMap(func() map[string]int { return a.Poles })
+}
+
+func (a *Account) PatternCounts() map[int]int {
+	return a.countMap(func() map[string]int { return a.Patterns })
+}
+
+func (a *Account) countMap(get func() map[string]int) map[int]int {
+	out := map[int]int{}
+	if a == nil {
+		return out
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	for k, q := range get() {
+		if id, err := strconv.Atoi(k); err == nil && id > 0 && q > 0 {
+			out[id] = q
+		}
+	}
+	return out
+}
+
+// FlagSelection returns the persisted SelectFlag choice (0 = client default).
+func (a *Account) FlagSelection() (pole, pattern, flagType int) {
+	if a == nil {
+		return 0, 0, 0
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	return a.FlagPole, a.FlagPattern, a.FlagType
+}
+
+func (a *Account) SetFlagSelection(pole, pattern, flagType int) {
+	persistMutation(a, func() {
+		a.FlagPole, a.FlagPattern, a.FlagType = pole, pattern, flagType
+	})
+}
+
+// UsePattern consumes one banner charge (in-match UseFlag 0x5b). Unlimited
+// banners are never decremented.
+func (a *Account) UsePattern(patternID int) {
+	if a == nil || patternID <= 0 || items.PatternUnlimited(patternID) {
+		return
 	}
 	persistMutation(a, func() {
-		debit := unitPrice * qty
-		switch payType {
-		case 5:
-			a.Emblem = maxInt(0, a.Emblem-debit)
-		case 2:
-			a.Rune = maxInt(0, a.Rune-debit)
-		case 1, 3, 4:
-			a.Gems = maxInt(0, a.Gems-debit)
+		key := strconv.Itoa(patternID)
+		if a.Patterns == nil || a.Patterns[key] <= 0 {
+			return
 		}
-		if itemID > 0 {
-			if a.Inscriptions == nil {
-				a.Inscriptions = map[string]int{}
-			}
-			a.Inscriptions[strconv.Itoa(itemID)] += qty
+		a.Patterns[key]--
+		if a.Patterns[key] <= 0 {
+			delete(a.Patterns, key)
 		}
 	})
-	return a.Wallet()
 }
 
 func (a *Account) ExpandTabletCapacity() (current, next int) {

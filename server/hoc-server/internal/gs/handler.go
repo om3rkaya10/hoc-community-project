@@ -10,6 +10,7 @@ import (
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/config"
+	"hoc-server/internal/domain/matchpi"
 	"hoc-server/internal/gs/trade"
 	"hoc-server/internal/match"
 	"hoc-server/internal/netx"
@@ -713,18 +714,23 @@ func handleReady(conn net.Conn, st *connState) {
 		customOpts = room.CustomOpts
 		gameMode = config.GameModeForMapName(mapName)
 	}
+	extra := matchpi.Extra(acc)
 	lm := wiregs.LoadMapSolo(
 		st.tskcid, st.sess.SeatHeroID, st.sess.SeatSkinID,
 		st.sess.SeatSpell1, st.sess.SeatSpell2,
-		gameMode, config.GSIModeParam, nick, guid,
+		gameMode, config.GSIModeParam, nick, guid, extra,
 	)
 	if seed != 0 {
 		// rebuild with seed via shared helper
 		lm = wiregs.LoadMapShared(st.tskcid, 1, seed, gameMode, config.GSIModeParam, customOpts, []wiregs.LoadMapMember{{
 			Seat0: 0, Hero: st.sess.SeatHeroID, Skin: st.sess.SeatSkinID,
 			Spell1: st.sess.SeatSpell1, Spell2: st.sess.SeatSpell2,
-			Nick: nick, GUID: guid, IsOwner: true,
+			Nick: nick, GUID: guid, IsOwner: true, Extra: extra,
 		}})
+	}
+	if extra != nil {
+		fmt.Printf(" [GS] LoadMap PI extra awake=%v talentPage=%d talents=%d banner=%d/%d x%d\n",
+			extra.AwakeWire, extra.TalentPage, len(extra.Talents), extra.Pole, extra.Pattern, extra.PatternUses)
 	}
 	sendSyn(conn, st, 0x2002, lm)
 	fmt.Printf(" [GS SENT] LoadMap 0x2002 seat=1 hero=%d map=%q mode=%d opts=%d/%d/%d/%d\n",
@@ -754,11 +760,14 @@ func broadcastSharedLoadMap(room *session.Room, reason string) {
 			continue
 		}
 		nick := m.Account.Nickname
+		extra := matchpi.Extra(m.Account)
 		roster = append(roster, wiregs.LoadMapMember{
 			Seat0: m.Seat, Hero: m.SeatHeroID, Skin: m.SeatSkinID,
 			Spell1: m.SeatSpell1, Spell2: m.SeatSpell2,
-			Nick: nick, GUID: m.GUID, IsOwner: room.Host == m,
+			Nick: nick, GUID: m.GUID, IsOwner: room.Host == m, Extra: extra,
 		})
+		fmt.Printf(" [ROOM] LoadMap PI extra user=%s awake=%v talentPage=%d talents=%d banner=%d/%d x%d\n",
+			m.Username, extra.AwakeWire, extra.TalentPage, len(extra.Talents), extra.Pole, extra.Pattern, extra.PatternUses)
 	}
 	room.Lock()
 	room.State = "match"
