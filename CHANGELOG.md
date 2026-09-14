@@ -1,5 +1,14 @@
 # Changelog
 
+## Hotfix — 2026-09-14 (on top of server-v0.1.5)
+
+### Lobby chat, in-match chat and minimap ping
+
+- The game server now relays custom-room lobby chat (`0x1003`), in-match chat and minimap pings (`op8`); they were previously dropped, so no player saw them.
+- In-match chat and pings are stamped with the room frame clock before relay; relaying the sender's own frame made the client log out (`Dev|3004`).
+- Team-scoped messages (aim `0x800`) reach only the sender's team half; all-chat (`0x4000`) reaches the whole room.
+- Added regression coverage for scope routing, frame stamping and body layout.
+
 ## server-v0.1.5 — 2026-09-14
 
 ### Inventory v1: tablets, shop purchases, flags, in-match passives

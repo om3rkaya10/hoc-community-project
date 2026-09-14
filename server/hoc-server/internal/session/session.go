@@ -1465,6 +1465,9 @@ func sameTeamSeat(a, b int) bool {
 	return (a < 5) == (b < 5)
 }
 
+// SameTeamSeat is the exported form for team-scoped relays (chat, ping).
+func SameTeamSeat(a, b int) bool { return sameTeamSeat(a, b) }
+
 // ClaimSeatHero makes hero selection exclusive within one team half only.
 // Enemy-team mirrors of the same hero are allowed. A same-team peer already
 // owning the hero wins; the rejected request must receive no ACK.

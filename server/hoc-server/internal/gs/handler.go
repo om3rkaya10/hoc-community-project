@@ -599,8 +599,14 @@ func handlePkt(conn net.Conn, st *connState, seq uint16, payload []byte) {
 			fmt.Printf(" [GS SENT] op4 pong room=%d\n", st.roomID)
 		}
 
+	case op == 9 && sub == 0x1003:
+		handleLobbyChat(conn, st, slot, body)
+
 	case op == 7:
 		handleUnitAction(conn, st, slot, sub, body)
+
+	case op == 8:
+		handleUnitAide(conn, st, slot, sub, body)
 
 	case op == 0xc || op == 12:
 		trade.Dispatch(&trade.Ctx{
