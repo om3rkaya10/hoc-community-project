@@ -1,5 +1,9 @@
 # Changelog
 
+## Client — Global Public Beta 0.3 arm64-v8a — 2026-09-14
+
+- Added an `arm64-v8a` build of the Public Beta 0.3 client for devices without 32-bit support. Same server, same fixes; distributed as a separate APK from the 32-bit one.
+
 ## Hotfix — 2026-09-14 (on top of server-v0.1.5)
 
 ### Lobby chat, in-match chat and minimap ping
