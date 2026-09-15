@@ -154,6 +154,24 @@ func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt
 			sendE02D(conn, sess, peer, "TRADE-GS after quit-room fallback", false)
 		}
 
+	case 0xe00e: // QueryUser — friend presence poll (DlgLgmMainMenuFriends)
+		names := glblock.QueryUserNames(pkt)
+		states := make([]glblock.UserState, 0, len(names))
+		online := 0
+		for _, name := range names {
+			st := glblock.UserStateOffline
+			if other := session.FindByUsername(name); other != nil {
+				st = glblock.UserStateOnline
+				if other.IsMatchPlaying() || other.IsMatchLoading() {
+					st = glblock.UserStateInGame
+				}
+				online++
+			}
+			states = append(states, glblock.UserState{Username: name, State: st})
+		}
+		_, _ = conn.Write(glblock.QueryUserReply(states))
+		fmt.Printf(" [LOBBY#%d SENT] 0xe00f query_user n=%d online=%d\n", peer, len(names), online)
+
 	case 0x1208:
 		_, _ = conn.Write(glblock.Empty(0x2108))
 		fmt.Printf(" [LOBBY#%d SENT] 0x2108 leave\n", peer)

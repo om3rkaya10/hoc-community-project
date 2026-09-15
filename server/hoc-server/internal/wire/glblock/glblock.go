@@ -275,3 +275,41 @@ func GuildLoginComplete() []byte {
 		{0x150a, TypeString, nil},
 	})
 }
+
+// Friend presence (lobby QueryUser, RE 2026-09-15). C2S 0xe00e carries one
+// 0x1008 string per queried username; S2C 0xe00f answers with one 0x102f
+// tree per user holding 0x1008 (username) and 0x1030 (state char). The
+// client maps state 1 → 0 (offline); 2 = online in lobby (triggers the
+// P2P chat build so PM works); 3 = in a match.
+const (
+	UserStateOffline byte = 1
+	UserStateOnline  byte = 2
+	UserStateInGame  byte = 3
+)
+
+type UserState struct {
+	Username string
+	State    byte
+}
+
+func QueryUserNames(pkt []byte) []string {
+	var names []string
+	for _, c := range IterChildren(pkt) {
+		if c.TypeID == 0x1008 && c.Type == TypeString && len(c.Value) > 0 {
+			names = append(names, string(c.Value))
+		}
+	}
+	return names
+}
+
+func QueryUserReply(states []UserState) []byte {
+	var kids []Child
+	for _, u := range states {
+		inner := PackChildren([]Child{
+			{0x1008, TypeString, []byte(u.Username)},
+			{0x1030, TypeChar, Char(u.State)},
+		})
+		kids = append(kids, Child{0x102F, TypeTree, inner})
+	}
+	return PackPacket(0xe00f, kids)
+}

@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, and `server-v0.1.5`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, and `server-v0.1.6`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.6
+
+`server-v0.1.6` is a social hotfix release. It implements the Gaia Osiris friend endpoints (requests, accept/ignore, list, remove), the Seshat batch profile lookup the friends list depends on, the Kairos alert stream for instant friend-request and chat-invitation delivery, lobby presence (`0xe00e`/`0xe00f`) so friends show as online or in a match, and the Arion group-chat service that carries friend private messages. Before this release the friends list could not add anyone, everyone appeared offline and private messages went nowhere. It is backed by the deterministic Go suite and a recorded two-client Nox validation against a local build in `VALIDATION.md`. No client update is required; it pairs with Global Public Beta 0.3.
 
 ### server-v0.1.5
 

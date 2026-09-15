@@ -91,6 +91,15 @@ type Account struct {
 	FlagPattern      int            `json:"flag_pattern"`
 	FlagType         int            `json:"flag_type"`
 	InventoryVersion int            `json:"inventory_version"`
+
+	// Social (Gaia Osiris, 2026-09-15). Friends is the bilateral friend set
+	// (usernames, Norm'd); FriendRequests are pending incoming
+	// connection_approval requests (see friends.go). IconSign is the raw
+	// Trade_UserData blob the client PUTs to profiles/me/myprofile/_hoc_icon_sign
+	// and reads back for friends through /profiles?credentials=.
+	Friends        []string           `json:"friends,omitempty"`
+	FriendRequests []FriendRequestRec `json:"friend_requests,omitempty"`
+	IconSign       string             `json:"icon_sign,omitempty"`
 }
 
 type storeFile struct {

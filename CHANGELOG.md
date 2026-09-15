@@ -1,5 +1,15 @@
 # Changelog
 
+## server-v0.1.6 — 2026-09-15
+
+### Hotfix: friends list, presence and private chat
+
+- Friends: the client's Gaia Osiris calls are now served instead of stubbed. Players can send friend requests (by in-game nickname or login name), see incoming requests in the message box, accept or ignore them, list friends and remove them. Crossing requests resolve straight into a friendship. Friend data is persisted per account.
+- Friends: the batch profile lookup returns nickname, icon and signature in the shape the client parses, so friend entries and request messages show real names instead of a blank or a phantom entry.
+- Notifications: `/alerts/me` is a real Kairos event stream, so a friend request or a chat invitation reaches the other player immediately (no re-login needed).
+- Presence: the lobby QueryUser request (`0xe00e`) is answered with each friend's live state — offline, online, or in a match — so the friends list no longer shows everyone as offline and PM is no longer refused with "user is offline".
+- Chat: the Arion group-chat service (`/chat/rooms/...`) is implemented — room subscribe, streamed listen with heartbeats, message send, and P2P invitations — which makes friend private messages work end to end, including the new-message light in the main menu.
+- Regression coverage for friend request flows (create, accept, reject, cancel, crossing requests, persistence) and nickname-first player lookup.
 ## Client — Global Public Beta 0.3 arm64-v8a — 2026-09-14
 
 - Added an `arm64-v8a` build of the Public Beta 0.3 client for devices without 32-bit support. Same server, same fixes; distributed as a separate APK from the 32-bit one.

@@ -657,6 +657,23 @@ func ResolveGS(token, username string) (*Session, string) {
 	return nil, "none"
 }
 
+// FindByUsername returns the lobby session of an online player (nil when the
+// player has no lobby connection). Used for friend presence (lobby 0xe00e).
+func FindByUsername(username string) *Session {
+	un := accounts.Norm(username)
+	if un == "" {
+		return nil
+	}
+	sessMu.RLock()
+	defer sessMu.RUnlock()
+	for _, s := range byConn {
+		if s != nil && accounts.Norm(s.Username) == un {
+			return s
+		}
+	}
+	return nil
+}
+
 // ClaimMatchHold resolves the reconnect identity carried by ReLoginReq and
 // exclusively claims the exact reserved room/seat. Lookup is by room membership
 // (not lobby byConn) so a lobby EOF during hold still finds the seat.

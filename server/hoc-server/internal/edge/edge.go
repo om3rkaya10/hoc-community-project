@@ -112,6 +112,10 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf(" [HTTP] %s %s ua=%q\n", r.Method, r.URL.RequestURI(), r.UserAgent())
 
 	switch {
+	// Arion group chat (ChatLibv2) — first: room names carry player nicks
+	// that could match the substring cases below. See chat.go.
+	case strings.HasPrefix(low, "/chat/"):
+		handleChat(w, r)
 	case strings.HasSuffix(low, "/urls") || strings.Contains(low, "/urls"):
 		respondJSON(w, r, urlsResponsePayload())
 	case strings.HasSuffix(low, "/datacenters"):
@@ -191,6 +195,12 @@ func handle(w http.ResponseWriter, r *http.Request) {
 	// Hestia BEFORE bare users/me — configs/users/me must not become profile JSON.
 	case strings.Contains(low, "configs/users/me") || strings.Contains(low, "/configs/") || strings.Contains(low, "hestia"):
 		handleHestiaConfig(w, r)
+	// Osiris social: friend list / requests (see friends.go).
+	case strings.HasPrefix(low, "/accounts/me/connections") || strings.HasPrefix(low, "/accounts/me/requests"):
+		handleOsirisAccounts(w, r)
+	// Seshat batch profiles for the friend list.
+	case strings.HasPrefix(low, "/profiles") && !strings.Contains(low, "/profiles/") && q.Get("credentials") != "":
+		handleBatchProfiles(w, r)
 	case strings.Contains(low, "users/me") || strings.Contains(low, "profiles/me") || strings.Contains(low, "seshat"):
 		handleProfile(w, r)
 	case strings.Contains(low, "games/mygame/alias") || strings.Contains(low, "games/mygame"):
@@ -216,7 +226,9 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, r, map[string]any{"status": 1, "error": 0, "device_id": "mock_device_hoc"})
 	case strings.Contains(low, "accounts/me") || strings.Contains(low, "connection_approval"):
 		respondJSON(w, r, map[string]any{"status": 1, "error": 0, "requests": []any{}})
-	case strings.Contains(low, "alerts/me") || strings.Contains(low, "/alerts"):
+	case strings.Contains(low, "alerts/me"):
+		handleKairosAlerts(w, r)
+	case strings.Contains(low, "/alerts"):
 		respondJSON(w, r, map[string]any{"status": 1, "error": 0, "alerts": []any{}})
 	case strings.Contains(low, "chk_ver") || strings.Contains(low, "download_idx") || strings.Contains(low, "all_dlc"):
 		respondJSON(w, r, map[string]any{
@@ -299,6 +311,9 @@ func handleLocate(w http.ResponseWriter, r *http.Request, service string) {
 		})
 	case s == "auth" || s == "message" || s == "asset" || s == "config" || s == "storage" || s == "etsv2" || s == "ads_agency":
 		respondBytes(w, r, "text/plain", []byte(host8443))
+	case s == "groupchat":
+		// Arion chat: see chatHost() — the ChatLib resolver bypasses the DNS remap.
+		respondBytes(w, r, "text/plain", []byte(edgeHostPort(chatHost(), 8080)))
 	case s == "gllive-ope" || s == "offline_items":
 		respondJSON(w, r, map[string]any{"status": 1, "error": 0, "result": map[string]any{"host": config.ClientHost(), "port": 8443}})
 	default:
@@ -643,6 +658,17 @@ func handleProfile(w http.ResponseWriter, r *http.Request) {
 			acc.SetGenderStr(obj)
 			fmt.Printf(" [ACCOUNT] ★gender SET %q\n", obj)
 		}
+	// SendPutUserData: object is a JSON string literal holding the base64
+	// msgpack Trade_UserData (icon, sign, name); friends read it back verbatim.
+	case strings.HasSuffix(path, "/_hoc_icon_sign"):
+		if obj != "" {
+			var s string
+			if err := json.Unmarshal([]byte(obj), &s); err != nil {
+				s = strings.TrimSpace(obj)
+			}
+			acc.SetIconSign(s)
+			fmt.Printf(" [ACCOUNT] icon_sign SET user=%q len=%d\n", acc.Username, len(s))
+		}
 	}
 
 	aid := accounts.AccountIDString(acc)
@@ -820,6 +846,7 @@ func ServeDual8080(addr string, crt, key string, lobby func(net.Conn, string)) e
 			case buf[0] == 0x16 && buf[1] == 0x03:
 				tlsConn := tls.Server(peeked, tlsCfg)
 				if err := tlsConn.Handshake(); err != nil {
+					fmt.Printf(" [DUAL] TLS handshake failed from %s: %v\n", conn.RemoteAddr(), err)
 					_ = conn.Close()
 					return
 				}
