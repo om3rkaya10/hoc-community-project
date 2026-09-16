@@ -1,5 +1,16 @@
 # Changelog
 
+## Client — Global Public Beta 0.3.2 (armeabi-v7a and arm64-v8a) — 2026-09-16
+
+- Match loading crashed on Android 15/16 devices (loading bar stuck at 72.5 %, then "Heroes O&C has stopped"; reported from a Galaxy A36 5G and a Honor 200, reproduced on a Galaxy A36 5G through Samsung Remote Test Lab). `TerrainTiled::GetHeight(float, float, vector3d*, WATER_INFO*)` rejects a terrain coordinate only when it is *greater than* the map size, so a water-material model sitting exactly on the far edge (`iz == height`) passed the check and the bilinear fetch read one row past the `(w+1)*(h+1)` heightmap. Older allocators land that read in readable heap; Scudo on Android 15/16 ends the block just before a guard page, so the read faults (`SIGSEGV SEGV_ACCERR` in `GLThread`). Both compares now reject the edge (`bhi` → `bhs`) and fall through to the existing default-height return. Both APKs rebuilt; the native libraries differ from 0.3 / 0.3.1 arm64 only at those two instructions. Verified on the A36 with both ABIs. The bug exists in the original client.
+
+## server-v0.1.8 — 2026-09-16
+
+### Hotfix: summoner spells parsed from the real SkillAck layout
+
+- Summoner spells sometimes did not carry into the match, or different values appeared, and a retry would "fix" it. The server located the spell pair in the client's `0x100C` SkillAck body with a READY+14 read plus a byte scan for two ints in 100..65536; the public-server journal shows the scan mostly latched garbage (3584/3840, 6912/7168 — two consecutive small ints read one byte early) for the very same body sizes that other times parsed fine. The body is deterministic — cid, three length-prefixed UTF strings (session guid, PlayerInfo guid, nickname), then a fixed run of 139 little-endian ints starting with READY, two PlayerInfo ints, spell 1 and spell 2 — so the old code, which walked only two strings, depended on how the third length prefix happened to look. The parser now walks the three strings and reads READY+12 / READY+16; the heuristics remain only as a fallback for bodies whose prefixes do not parse. No client update is required.
+- Tests build SkillAck bodies per that layout for the nickname/guid lengths seen on the public server; the previous parser reproduces the live 3584/3840 garbage on them.
+
 ## Client — Global Public Beta 0.3.1 arm64-v8a — 2026-09-16
 
 - arm64-v8a client: private messages never rendered. `ChatSession::CreateRunThread` requests `SCHED_RR` with priority 0 for the game-side chat thread; bionic rejects that `sched_setscheduler` call and, in 64-bit processes only, fails the `pthread_create` ("for backwards compatibility reasons, we only report failures on 64-bit devices"), so the thread that drains the chat library's queue never started. The 64-bit build now requests `SCHED_OTHER`; PM, the new-message light and invitations behave as on 32-bit. The bug exists in the original 64-bit client too. 32-bit APK unchanged.

@@ -70,8 +70,50 @@ func PlayerLeaveRoom3003(tskcid, seat0 int, nick string) []byte {
 	return body
 }
 
-// ParseSummonerSpells — READY+14 spell pair from SkillAck body (echo-only, no patch).
+// SkillBody layout (client, 32-bit SO): NetPacketSynGameState::NetPacketSynGameState
+// @0x126c670 writes cid(int) + UTF(session GUID); PlayerInfoSkillEncode @0x12446ec then
+// appends UTF(PlayerInfo+0x494 guid) + UTF(PlayerInfo+0x490 nick) followed by a fixed
+// run of 139 ints: READY (PI+0x10), PI+0x40, PI+0x48, spell1 (PI+0x50), spell2 (PI+0x58),
+// 40 ints from PI+0x60, 40 from PI+0x1a0, then PI+0x2e0.. . Every UTF is a u16-LE length
+// prefix + bytes and every int is LE (ByteArray endian flag 0). So the READY int sits
+// right after the THIRD UTF and the summoner spells are READY+12 / READY+16; the old
+// READY+14 read split an int and the byte-scan fallback latched garbage such as
+// 3584/3840 (two consecutive small ints read one byte early).
+const skillBodyUTFs = 3
+
+// skillReadyOffsetFixed walks cid + three UTFs and returns the READY int offset, or -1
+// when the body is too short / a length prefix runs past the end.
+func skillReadyOffsetFixed(body []byte) int {
+	o := 4
+	for i := 0; i < skillBodyUTFs; i++ {
+		if o+2 > len(body) {
+			return -1
+		}
+		ln := int(binary.LittleEndian.Uint16(body[o : o+2]))
+		o += 2 + ln
+		if o > len(body) {
+			return -1
+		}
+	}
+	if o+4 > len(body) {
+		return -1
+	}
+	return o
+}
+
+// ParseSummonerSpells — spell pair from the 0x100C SkillAck body (echo-only, no patch).
 func ParseSummonerSpells(body []byte) (s1, s2 int, ok bool) {
+	if o := skillReadyOffsetFixed(body); o >= 0 && o+20 <= len(body) {
+		a := int(binary.LittleEndian.Uint32(body[o+12 : o+16]))
+		b := int(binary.LittleEndian.Uint32(body[o+16 : o+20]))
+		return a, b, spellPairOK(a, b)
+	}
+	return parseSummonerSpellsLegacy(body)
+}
+
+// parseSummonerSpellsLegacy is the pre-2026-09-16 heuristic (READY+14 + byte scan),
+// kept only for bodies whose UTF prefixes do not parse.
+func parseSummonerSpellsLegacy(body []byte) (s1, s2 int, ok bool) {
 	if len(body) < 4+4+20 {
 		return 0, 0, false
 	}
@@ -106,7 +148,10 @@ func ParseSummonerSpells(body []byte) (s1, s2 int, ok bool) {
 }
 
 func ParseReadyFromSkill(body []byte) (ready int, ok bool) {
-	o := skillReadyOffset(body)
+	o := skillReadyOffsetFixed(body)
+	if o < 0 {
+		o = skillReadyOffset(body)
+	}
 	if o < 0 {
 		o, _, _ = skillBodyAfterUTFs(body)
 	}

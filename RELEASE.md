@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, and `server-v0.1.7`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, `server-v0.1.7`, and `server-v0.1.8`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.8
+
+`server-v0.1.8` is a summoner-spell hotfix on top of `server-v0.1.7`. The server located the two summoner spells in the client's `0x100C` SkillAck body heuristically (READY+14 plus a byte scan), and on the public server that scan mostly latched garbage, so the spells a player picked sometimes did not reach the LoadMap PlayerInfo and the match. The body layout was recovered from the client (cid, three length-prefixed strings, then a fixed run of little-endian ints with the spells at READY+12 / READY+16) and the parser now reads it directly. It is backed by the deterministic Go suite (new layout-based parser tests) and a recorded validation on the public server with a Nox client in `VALIDATION.md`. No client update is required; it pairs with Global Public Beta 0.3.2, the client build that fixes the Android 15/16 match-loading crash (see `CHANGELOG.md` and `COMPATIBILITY.md`).
 
 ### server-v0.1.7
 

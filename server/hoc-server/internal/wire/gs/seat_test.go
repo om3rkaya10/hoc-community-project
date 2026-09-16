@@ -38,9 +38,73 @@ func TestSeatRoster1002TwoPlayers(t *testing.T) {
 }
 
 func TestPlayerLeaveRoom3003(t *testing.T) {
-	got := wiregs.PlayerLeaveRoom3003(2, 1, "Enterpries2")
-	want := []byte{2, 0, 0, 0, 2, 11, 0, 'E', 'n', 't', 'e', 'r', 'p', 'r', 'i', 'e', 's', '2'}
+	got := wiregs.PlayerLeaveRoom3003(2, 1, "Omer")
+	want := []byte{2, 0, 0, 0, 2, 4, 0, 'O', 'm', 'e', 'r'}
 	if string(got) != string(want) {
 		t.Fatalf("got=%x want=%x", got, want)
+	}
+}
+
+// skillBody mirrors the client's 0x100C body: cid + UTF(session guid) + UTF(PI guid) +
+// UTF(nick) + 139 LE ints (READY, PI+0x40, PI+0x48, spell1, spell2, ...).
+func skillBody(sessGUID, piGUID, nick string, ready, spell1, spell2 int) []byte {
+	b := wiregs.CIDOnly(7)
+	for _, s := range []string{sessGUID, piGUID, nick} {
+		b = append(b, wiregs.UTF(s)...)
+	}
+	ints := make([]int32, 139)
+	ints[0] = int32(ready)
+	ints[1], ints[2] = 3, 5 // PI+0x40 / PI+0x48
+	ints[3], ints[4] = int32(spell1), int32(spell2)
+	for i := 5; i < len(ints); i++ {
+		ints[i] = int32(i + 9) // small consecutive values (14, 15, ...) like the live bodies
+	}
+	tmp := make([]byte, 4)
+	for _, v := range ints {
+		binary.LittleEndian.PutUint32(tmp, uint32(v))
+		b = append(b, tmp...)
+	}
+	return b
+}
+
+func TestParseSummonerSpellsFixedLayout(t *testing.T) {
+	cases := []struct {
+		sess, guid, nick string
+		s1, s2           int
+	}{
+		{"1000277", "", "koshar23", 600, 941},
+		{"1000277", "", "hmhm1234", 600, 602},
+		{"1000253", "", "enterpries", 597, 600},
+		{"1000261", "", "edlonbloper@gmail", 602, 594},
+		{"1000307", "ed26f1e7d165", "samsungrtl", 603, 600},
+		{"", "", "a", 594, 600},
+		{"1000001", "x", "deneme99999", 941, 600},
+	}
+	for _, c := range cases {
+		body := skillBody(c.sess, c.guid, c.nick, 1, c.s1, c.s2)
+		if want := 4 + 6 + len(c.sess) + len(c.guid) + len(c.nick) + 139*4; len(body) != want {
+			t.Fatalf("%s: body %dB want %d", c.nick, len(body), want)
+		}
+		s1, s2, ok := wiregs.ParseSummonerSpells(body)
+		if !ok || s1 != c.s1 || s2 != c.s2 {
+			t.Fatalf("%s: spells=%d/%d ok=%v want %d/%d", c.nick, s1, s2, ok, c.s1, c.s2)
+		}
+		rdy, ok := wiregs.ParseReadyFromSkill(body)
+		if !ok || rdy != 1 {
+			t.Fatalf("%s: ready=%d ok=%v", c.nick, rdy, ok)
+		}
+		rdy, ok = wiregs.ParseReadyFromSkill(skillBody(c.sess, c.guid, c.nick, 0, c.s1, c.s2))
+		if !ok || rdy != 0 {
+			t.Fatalf("%s: ready(0)=%d ok=%v", c.nick, rdy, ok)
+		}
+	}
+}
+
+func TestParseSummonerSpellsNoSpellsNotLatched(t *testing.T) {
+	if _, _, ok := wiregs.ParseSummonerSpells(skillBody("1000277", "", "koshar23", 1, 0, 0)); ok {
+		t.Fatal("0/0 spells must not latch")
+	}
+	if _, _, ok := wiregs.ParseSummonerSpells([]byte{1, 2, 3}); ok {
+		t.Fatal("short body must not latch")
 	}
 }
