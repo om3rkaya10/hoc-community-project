@@ -1,5 +1,9 @@
 # Changelog
 
+## Client — Global Public Beta 0.3.1 arm64-v8a — 2026-09-16
+
+- arm64-v8a client: private messages never rendered. `ChatSession::CreateRunThread` requests `SCHED_RR` with priority 0 for the game-side chat thread; bionic rejects that `sched_setscheduler` call and, in 64-bit processes only, fails the `pthread_create` ("for backwards compatibility reasons, we only report failures on 64-bit devices"), so the thread that drains the chat library's queue never started. The 64-bit build now requests `SCHED_OTHER`; PM, the new-message light and invitations behave as on 32-bit. The bug exists in the original 64-bit client too. 32-bit APK unchanged.
+
 ## server-v0.1.7 — 2026-09-16
 
 ### Hotfix: private chat over the public server
@@ -8,7 +12,7 @@
 - Private chat: the listen stream is sent with explicit identity framing (the client's chat reader has no chunked-transfer decoder), a 5 s heartbeat inside the client's 10 s per-line timeout, and stays open instead of being rotated; messages posted while a client is between connections are queued and delivered on reconnect.
 - Notifications: the alert-stream keepalive is a real `keepalive` event instead of an SSE comment line, which the client's parser was not proven to tolerate over WAN.
 - Regression coverage for the chat flow over real HTTP connections: room_info first, reconnect key preserved, distinct id prefixes and counter rollover, POST echo matching the streamed document, fan-out to two subscribers.
-- Known issue: private messages do not render in the **arm64-v8a** client build (Global Public Beta 0.3 arm64) — the same account on the 32-bit APK works. Under investigation on the client side; the server fix applies to both.
+- Known issue at release time: private messages did not render in the **arm64-v8a** client build — resolved by client build Global Public Beta 0.3.1 arm64 (see above).
 
 ## server-v0.1.6 — 2026-09-15
 
