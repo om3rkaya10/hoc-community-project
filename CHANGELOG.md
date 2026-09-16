@@ -1,5 +1,15 @@
 # Changelog
 
+## server-v0.1.7 — 2026-09-16
+
+### Hotfix: private chat over the public server
+
+- Private chat: every message after the first one in a conversation was silently dropped by the client when played over the public server. The client keeps a per-conversation set of message ids but compares only their first four characters, so ids that shared a prefix were treated as duplicates. Message ids are now short fixed-width base-36 counters that always differ in the compared bytes and are not replayed after a server restart.
+- Private chat: the listen stream is sent with explicit identity framing (the client's chat reader has no chunked-transfer decoder), a 5 s heartbeat inside the client's 10 s per-line timeout, and stays open instead of being rotated; messages posted while a client is between connections are queued and delivered on reconnect.
+- Notifications: the alert-stream keepalive is a real `keepalive` event instead of an SSE comment line, which the client's parser was not proven to tolerate over WAN.
+- Regression coverage for the chat flow over real HTTP connections: room_info first, reconnect key preserved, distinct id prefixes and counter rollover, POST echo matching the streamed document, fan-out to two subscribers.
+- Known issue: private messages do not render in the **arm64-v8a** client build (Global Public Beta 0.3 arm64) — the same account on the 32-bit APK works. Under investigation on the client side; the server fix applies to both.
+
 ## server-v0.1.6 — 2026-09-15
 
 ### Hotfix: friends list, presence and private chat

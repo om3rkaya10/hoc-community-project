@@ -125,8 +125,11 @@ func handleKairosAlerts(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			fmt.Printf(" [KAIROS] → %s %s\n", user, payload)
 		case <-ticker.C:
-			// SSE comment line: ignored by the parser, keeps NAT/idle timers alive.
-			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+			// Keepalive as a real event: KairosServiceCallback ignores unknown
+			// types, whereas a bare SSE comment line is not proven safe with
+			// the glwebtools parser (WAN 2026-09-15: pushes after a comment
+			// line were not acted on).
+			if _, err := fmt.Fprint(w, "data: {\"type\":\"keepalive\"}\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()

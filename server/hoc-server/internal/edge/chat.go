@@ -53,9 +53,10 @@ type chatSender struct {
 }
 
 type chatMember struct {
-	user  string
-	queue chan chatMsg
-	seen  time.Time
+	user         string
+	queue        chan chatMsg
+	seen         time.Time
+	reconnectKey string
 }
 
 type chatRoom struct {
@@ -67,14 +68,23 @@ type chatRoom struct {
 var (
 	chatMu    sync.Mutex
 	chatRooms = map[string]*chatRoom{}
-	chatSeq   int64
+	// MessageId::operator< compares only the first four bytes. Seed the
+	// process counter from time so a server restart does not replay 0001,
+	// 0002, ... into a client that retained its per-room duplicate set.
+	chatSeq = time.Now().UnixNano() % (36 * 36 * 36 * 36)
 )
 
 const (
-	// chatv2::TIMEOUT is 10s per request; answer the long-poll before that
-	// with a room_info heartbeat (the only idle payload the client accepts).
-	chatListenWait = 8 * time.Second
-	chatQueueDepth = 64
+	// chatv2::TIMEOUT is 10 s per ReadLine: something must arrive on an idle
+	// listen stream at least that often.
+	chatHeartbeat = 5 * time.Second
+	// Keep the listen socket alive. The client reconnects on transport EOF;
+	// forced rotation creates a race where the next POST lands before the
+	// new room_info has started the channel, and it also replays queued
+	// messages through the duplicate filter.
+	chatStreamLife  = 24 * time.Hour
+	chatFirstMsgGap = 300 * time.Millisecond
+	chatQueueDepth  = 64
 )
 
 func roomInfo(room *chatRoom, key string) map[string]any {
@@ -219,20 +229,26 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "subscribe":
 		room := chatRoomGet(roomKey, true)
-		room.join(user)
 		key := get("reconnect_key")
 		if key == "" {
 			key = fmt.Sprintf("rk_%s_%d", user, time.Now().UnixNano()/1e6)
 		}
+		mem := room.join(user)
+		mem.reconnectKey = key
 		base := chatBase() + "/chat/" + kind + "/" + url.PathEscape(name)
 		info := roomInfo(room, key)
 		// The client uses listen_url verbatim and sends no token on the
 		// long-poll, so the member identity rides in the URL itself.
+		// https_listen_url is deliberately the same plain-HTTP URL: over WAN
+		// the TLS listen attempt against the raw edge IP stalled ~30 s before
+		// the client fell back, and sends are dropped until the listen
+		// stream is up (WAN 2026-09-15).
+		listen := base + "/listen?k=" + url.QueryEscape(user)
 		resp := map[string]any{
 			"type":             "room_info",
 			"cmd_url":          base,
-			"listen_url":       base + "/listen?k=" + url.QueryEscape(user),
-			"https_listen_url": chatBaseTLS() + "/chat/" + kind + "/" + url.PathEscape(name) + "/listen?k=" + url.QueryEscape(user),
+			"listen_url":       listen,
+			"https_listen_url": listen,
 			"room_info":        info,
 		}
 		for k, v := range info {
@@ -248,9 +264,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		respondChatJSON(w, 200, map[string]any{"status": "ok"})
 
 	case "listen":
-		// Streaming mode: no Content-Length → chatv2 HTTPClient switches to
-		// ReadLine and consumes newline-terminated JSON docs until the socket
-		// closes. Transfer-Encoding: identity keeps net/http from chunking.
+		// Streamed body (no Content-Length → the client's HTTPClient reads
+		// JSON lines until the server closes). The first line is always
+		// room_info: the engine marks the channel started (UpdateChannel →
+		// MarkStarted) only after a room_info arrives on the listen path, and
+		// sends are refused until then. Further room_info lines are the idle
+		// heartbeat (chatv2::TIMEOUT is 10 s per ReadLine). Streams are
+		// closed after chatStreamLife; the client re-issues the GET and the
+		// member queue carries anything posted in between.
 		room := chatRoomGet(roomKey, true)
 		mem := room.join(user)
 		flusher, ok := w.(http.Flusher)
@@ -260,14 +281,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 		h := w.Header()
 		h.Set("Content-Type", "application/json")
+		// ChatLib HTTPClient reads the response body as LF-delimited JSON;
+		// its header parser has no Transfer-Encoding/chunk decoder. Force
+		// close-delimited identity framing and flush raw JSON documents.
 		h.Set("Transfer-Encoding", "identity")
 		h.Set("Cache-Control", "no-cache")
 		w.WriteHeader(200)
 		flusher.Flush()
 		fmt.Printf(" [CHAT] stream open %s in %s\n", user, roomKey)
-		defer fmt.Printf(" [CHAT] stream closed %s in %s\n", user, roomKey)
-		hb := time.NewTicker(chatListenWait)
-		defer hb.Stop()
 		writeDoc := func(v any) bool {
 			b, _ := json.Marshal(v)
 			if _, err := w.Write(append(b, '\r', '\n')); err != nil {
@@ -276,28 +297,39 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			return true
 		}
-		// First doc right away: the engine marks the channel started
-		// (UpdateChannel → MarkStarted) only after a room_info arrives on
-		// the listen stream; sends are refused until then.
-		first := roomInfo(room, "rk_"+user)
-		first["type"] = "room_info"
-		if !writeDoc(first) {
+		key := mem.reconnectKey
+		if key == "" {
+			key = "rk_" + user
+		}
+		info := roomInfo(room, key)
+		info["type"] = "room_info"
+		if !writeDoc(info) {
 			return
 		}
+		opened := time.Now()
+		life := time.NewTimer(chatStreamLife)
+		defer life.Stop()
+		beat := time.NewTicker(chatHeartbeat)
+		defer beat.Stop()
 		for {
 			select {
 			case m := <-mem.queue:
+				if gap := chatFirstMsgGap - time.Since(opened); gap > 0 {
+					time.Sleep(gap)
+				}
 				fmt.Printf(" [CHAT] deliver %s → %s in %s\n", m.Sender.Nickname, user, roomKey)
 				if !writeDoc(m) {
 					return
 				}
-			case <-hb.C:
-				info := roomInfo(room, "rk_"+user)
-				info["type"] = "room_info"
+			case <-beat.C:
 				if !writeDoc(info) {
 					return
 				}
+			case <-life.C:
+				fmt.Printf(" [CHAT] stream rotate %s in %s\n", user, roomKey)
+				return
 			case <-r.Context().Done():
+				fmt.Printf(" [CHAT] stream closed %s in %s\n", user, roomKey)
 				return
 			}
 		}
@@ -357,20 +389,23 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		room := chatRoomGet(roomKey, true)
-		room.join(user)
+		// ChatSession::MessageId::operator< compares only the first four
+		// bytes (strncmp(..., 4) @0x012dc690). IDs that differ after byte 4
+		// collapse to the same set key. Generate a fixed-width base-36
+		// counter so every message has a distinct four-byte ordering key.
 		chatMu.Lock()
 		chatSeq++
-		id := chatSeq
+		id := chatSeq % (36 * 36 * 36 * 36)
 		chatMu.Unlock()
+		idText := strconv.FormatInt(id, 36)
+		if len(idText) < 4 {
+			idText = strings.Repeat("0", 4-len(idText)) + idText
+		}
 		// MessageResponse::Parse reads every field with an unchecked
-		// GetString: id/sent/msg/untranslated_msg/sender.* MUST be strings
-		// (a number crashes the client). sent is a Zulu timestamp
-		// "YYYY-MM-DD HH:MM:SSZ": ChatLib parses any separators, but the game's
-		// ConvertChatSendTime uses sscanf("%d-%d-%d %d:%d:%dZ") (space, not T)
-		// and IsNewMessageToMe drops messages whose time parses as 0.
+		// GetString: id/sent/msg/untranslated_msg/sender.* MUST be strings.
 		m := chatMsg{
 			Type:      "message",
-			ID:        strconv.FormatInt(id, 10),
+			ID:        idText,
 			Sent:      time.Now().UTC().Format("2006-01-02 15:04:05Z"),
 			Msg:       text,
 			Untrans:   text,

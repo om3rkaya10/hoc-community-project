@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/config"
@@ -323,5 +325,191 @@ func TestLocateNeverReturnsBareIPOnLANEdge(t *testing.T) {
 	// GS relay keeps the raw IP (no TLS, no DNS on that path).
 	if got := config.EffectiveGSGateway(); got != "192.168.68.111" {
 		t.Fatalf("EffectiveGSGateway=%q, want LAN IP", got)
+	}
+}
+
+func chatTestRoom(t *testing.T) string {
+	t.Helper()
+	loadEdgeAccounts(t)
+	chatMu.Lock()
+	oldRooms := chatRooms
+	chatRooms = map[string]*chatRoom{}
+	chatMu.Unlock()
+	t.Cleanup(func() {
+		chatMu.Lock()
+		chatRooms = oldRooms
+		chatMu.Unlock()
+	})
+	return "/chat/rooms/" + url.PathEscape(t.Name())
+}
+
+func chatTestStream(t *testing.T, sub map[string]any) *json.Decoder {
+	t.Helper()
+	listenURL, ok := sub["listen_url"].(string)
+	if !ok || listenURL == "" {
+		t.Fatalf("subscribe returned invalid listen_url: %v", sub)
+	}
+	u, err := url.Parse(listenURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	handler := Handler()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(done)
+		handler.ServeHTTP(w, r)
+	}))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	var response *http.Response
+	t.Cleanup(func() {
+		cancel()
+		if response != nil {
+			response.Body.Close()
+		}
+		server.CloseClientConnections()
+		if response != nil {
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Error("listen handler did not terminate after cancellation")
+			}
+		}
+		server.Close()
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+u.RequestURI(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("listen status=%d", response.StatusCode)
+	}
+	if len(response.TransferEncoding) != 0 || response.ContentLength != -1 {
+		t.Fatalf("native listen framing mismatch: transfer=%v length=%d", response.TransferEncoding, response.ContentLength)
+	}
+	decoder := json.NewDecoder(response.Body)
+	var info map[string]any
+	if err := decoder.Decode(&info); err != nil {
+		t.Fatalf("first stream document: %v", err)
+	}
+	if info["type"] != "room_info" {
+		t.Fatalf("first stream document must be room_info: %v", info)
+	}
+	if info["reconnect_key"] != sub["reconnect_key"] {
+		t.Fatalf("reconnect key changed: subscribe=%v listen=%v", sub["reconnect_key"], info["reconnect_key"])
+	}
+	return decoder
+}
+
+func TestChatStreamPreservesReconnectKeyAndDeliversMessages(t *testing.T) {
+	room := chatTestRoom(t)
+	const reconnectKey = "retained-session-key"
+	code, _, sub := getJSON(t, http.MethodPost, room+"/subscribe", url.Values{
+		"access_token":  {accounts.StableAccessToken},
+		"reconnect_key": {reconnectKey},
+	})
+	if code != http.StatusOK || sub["reconnect_key"] != reconnectKey {
+		t.Fatalf("subscribe status=%d body=%v", code, sub)
+	}
+	stream := chatTestStream(t, sub)
+	seen := make(map[string]bool)
+	for _, text := range []string{"first message", "second message", "third message"} {
+		code, _, echo := getJSON(t, http.MethodPost, room, url.Values{
+			"access_token": {accounts.StableAccessToken},
+			"message":      {text},
+			"user":         {`{"nickname":"Enterpries1"}`},
+		})
+		id, ok := echo["id"].(string)
+		if code != http.StatusOK || !ok || len(id) < 4 {
+			t.Fatalf("message status=%d body=%v", code, echo)
+		}
+		if seen[id[:4]] {
+			t.Fatalf("message ID first four bytes were reused: %q", id)
+		}
+		seen[id[:4]] = true
+		var message map[string]any
+		if err := stream.Decode(&message); err != nil {
+			t.Fatalf("decode message %q: %v", text, err)
+		}
+		if message["type"] != "message" || message["id"] != id || message["msg"] != text || echo["msg"] != text {
+			t.Fatalf("POST echo/listen mismatch: echo=%v listen=%v", echo, message)
+		}
+	}
+}
+
+func TestChatStreamDeliversEachMessageToBothSubscribers(t *testing.T) {
+	room := chatTestRoom(t)
+	code, _, login := getJSON(t, http.MethodGet, "/BlueFox/authenticate?password=chat-test&scope=auth", nil)
+	secondToken, ok := login["access_token"].(string)
+	if code != http.StatusOK || !ok || secondToken == "" || secondToken == accounts.StableAccessToken {
+		t.Fatalf("second account status=%d body=%v", code, login)
+	}
+	tokens := []string{accounts.StableAccessToken, secondToken}
+	streams := make([]*json.Decoder, 0, len(tokens))
+	for _, token := range tokens {
+		code, _, sub := getJSON(t, http.MethodPost, room+"/subscribe", url.Values{
+			"access_token": {token},
+		})
+		if code != http.StatusOK {
+			t.Fatalf("subscribe status=%d body=%v", code, sub)
+		}
+		streams = append(streams, chatTestStream(t, sub))
+	}
+	seen := make(map[string]bool)
+	for sender, token := range tokens {
+		text := []string{"from Enterpries1", "from BlueFox"}[sender]
+		code, _, echo := getJSON(t, http.MethodPost, room, url.Values{
+			"access_token": {token},
+			"message":      {text},
+		})
+		id, ok := echo["id"].(string)
+		if code != http.StatusOK || !ok || len(id) < 4 || seen[id[:4]] {
+			t.Fatalf("invalid or repeated message ID: status=%d body=%v", code, echo)
+		}
+		seen[id[:4]] = true
+		for recipient, stream := range streams {
+			var message map[string]any
+			if err := stream.Decode(&message); err != nil {
+				t.Fatalf("recipient %d decoding sender %d: %v", recipient, sender, err)
+			}
+			if message["type"] != "message" || message["id"] != id || message["msg"] != text {
+				t.Fatalf("recipient %d: echo=%v listen=%v", recipient, echo, message)
+			}
+		}
+	}
+}
+
+func TestChatMessageIDsRemainDistinctAtBase36Boundaries(t *testing.T) {
+	room := chatTestRoom(t)
+	chatMu.Lock()
+	oldSeq := chatSeq
+	chatMu.Unlock()
+	t.Cleanup(func() {
+		chatMu.Lock()
+		chatSeq = oldSeq
+		chatMu.Unlock()
+	})
+	for _, start := range []int64{34, 36*36*36*36 - 2} {
+		chatMu.Lock()
+		chatSeq = start
+		chatMu.Unlock()
+		seen := make(map[string]bool)
+		for i := 0; i < 3; i++ {
+			code, _, message := getJSON(t, http.MethodPost, room, url.Values{
+				"access_token": {accounts.StableAccessToken},
+				"message":      {"boundary message"},
+			})
+			id, ok := message["id"].(string)
+			if code != http.StatusOK || !ok || len(id) < 4 {
+				t.Fatalf("counter start=%d message=%d: status=%d body=%v", start, i, code, message)
+			}
+			if seen[id[:4]] {
+				t.Fatalf("counter start=%d message=%d repeated four-byte key in ID %q", start, i, id)
+			}
+			seen[id[:4]] = true
+		}
 	}
 }

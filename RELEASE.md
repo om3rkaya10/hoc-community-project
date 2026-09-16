@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, and `server-v0.1.6`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, and `server-v0.1.7`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.7
+
+`server-v0.1.7` is a private-chat hotfix on top of `server-v0.1.6`. The client compares only the first four characters of a chat message id when filtering duplicates, so with the ids `server-v0.1.6` generated every message after the first in a conversation was dropped before rendering when played over the public server (the local two-client validation had not exposed it). Message ids are now short fixed-width base-36 counters, the listen stream uses explicit identity framing with a 5 s heartbeat and is no longer rotated, and the alert-stream keepalive is a real event. It is backed by the deterministic Go suite (including new chat-flow tests over real HTTP connections) and a recorded validation on the public server with a 32-bit phone client and a Nox client in `VALIDATION.md`. No client update is required; it pairs with Global Public Beta 0.3. Known issue: the arm64-v8a client build does not render private messages (client-side, under investigation).
 
 ### server-v0.1.6
 
