@@ -23,7 +23,10 @@ const (
 	DefaultBirthdate = "2003-07-25 01:59:14Z"
 )
 
+// TabletRec is one filled page slot. UID references the TabletInstance
+// (inventory v2); ID and Sockets mirror that instance for older readers.
 type TabletRec struct {
+	UID     int              `json:"uid,omitempty"`
 	ID      int              `json:"id"`
 	Sockets map[string][]int `json:"sockets"`
 }
@@ -83,14 +86,19 @@ type Account struct {
 	// (TabletSlot indexIDInPacket, sleep/delete/wake requests). Poles and
 	// Patterns feed GESub5Member18 (HocPole/HocFlag maps); Flag* is the
 	// SelectFlag choice. InventoryVersion gates the one-shot migration.
-	Items            map[string]int `json:"items"`
-	OwnedTablets     []int          `json:"owned_tablets"`
-	Poles            map[string]int `json:"poles"`
-	Patterns         map[string]int `json:"patterns"`
-	FlagPole         int            `json:"flag_pole"`
-	FlagPattern      int            `json:"flag_pattern"`
-	FlagType         int            `json:"flag_type"`
-	InventoryVersion int            `json:"inventory_version"`
+	Items        map[string]int `json:"items"`
+	OwnedTablets []int          `json:"owned_tablets"` // mirror of TabletInstances ids
+	// Inventory v2 (2026-09-18): TabletInstances is the owned vector in wire
+	// order, one entry per copy (see tablets.go). NextTabletUID allocates
+	// instance ids.
+	TabletInstances  []TabletInstance `json:"tablet_instances"`
+	NextTabletUID    int              `json:"next_tablet_uid,omitempty"`
+	Poles            map[string]int   `json:"poles"`
+	Patterns         map[string]int   `json:"patterns"`
+	FlagPole         int              `json:"flag_pole"`
+	FlagPattern      int              `json:"flag_pattern"`
+	FlagType         int              `json:"flag_type"`
+	InventoryVersion int              `json:"inventory_version"`
 
 	// Social (Gaia Osiris, 2026-09-15). Friends is the bilateral friend set
 	// (usernames, Norm'd); FriendRequests are pending incoming
@@ -726,96 +734,6 @@ func inscriptionPairsLocked(a *Account) [][4]int {
 	return out
 }
 
-// EquippedTablets: (page,slot) → (tabletID, sockets).
-func (a *Account) EquippedTablets() map[[2]int]struct {
-	ID      int
-	Sockets map[int][2]int
-} {
-	mu.RLock()
-	defer mu.RUnlock()
-	return equippedTabletsLocked(a)
-}
-
-func equippedTabletsLocked(a *Account) map[[2]int]struct {
-	ID      int
-	Sockets map[int][2]int
-} {
-	out := map[[2]int]struct {
-		ID      int
-		Sockets map[int][2]int
-	}{}
-	if a == nil {
-		return out
-	}
-	for key, rec := range a.Tablets {
-		var page, slot int
-		if _, err := fmt.Sscanf(key, "%d:%d", &page, &slot); err != nil {
-			continue
-		}
-		socks := map[int][2]int{}
-		for si, pair := range rec.Sockets {
-			var idx int
-			if _, err := fmt.Sscanf(si, "%d", &idx); err != nil {
-				continue
-			}
-			if len(pair) >= 1 {
-				q := 1
-				if len(pair) > 1 {
-					q = pair[1]
-				}
-				socks[idx] = [2]int{pair[0], q}
-			}
-		}
-		out[[2]int{page, slot}] = struct {
-			ID      int
-			Sockets map[int][2]int
-		}{ID: rec.ID, Sockets: socks}
-	}
-	return out
-}
-
-func (a *Account) TabletSockets() map[int]map[int][2]int {
-	mu.RLock()
-	defer mu.RUnlock()
-	return tabletSocketsLocked(a)
-}
-
-func tabletSocketsLocked(a *Account) map[int]map[int][2]int {
-	out := map[int]map[int][2]int{}
-	if a == nil {
-		return out
-	}
-	for tidS, socks := range a.BackpackSockets {
-		var tid int
-		if _, err := fmt.Sscanf(tidS, "%d", &tid); err != nil || tid == 0 {
-			continue
-		}
-		parsed := map[int][2]int{}
-		for si, entry := range socks {
-			var idx int
-			if _, err := fmt.Sscanf(si, "%d", &idx); err != nil {
-				continue
-			}
-			if len(entry) >= 1 {
-				q := 1
-				if len(entry) > 1 {
-					q = entry[1]
-				}
-				parsed[idx] = [2]int{entry[0], q}
-			}
-		}
-		if len(parsed) > 0 {
-			out[tid] = parsed
-		}
-	}
-	for _, eq := range equippedTabletsLocked(a) {
-		if eq.ID != 0 && len(eq.Sockets) > 0 {
-			out[eq.ID] = eq.Sockets
-		}
-	}
-	return out
-}
-
 func (a *Account) SelectedPage0() int {
 	if a == nil {
 		return 0
@@ -827,40 +745,6 @@ func (a *Account) SelectedPage0() int {
 		return 0
 	}
 	return p
-}
-
-func (a *Account) AwakeTablets() map[int]bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return awakeTabletsLocked(a)
-}
-
-func awakeTabletsLocked(a *Account) map[int]bool {
-	out := map[int]bool{}
-	if a == nil {
-		return out
-	}
-	equipped := equippedTabletsLocked(a)
-	if a.AwakeTabletIDs == nil {
-		for _, eq := range equipped {
-			if eq.ID > 0 {
-				out[eq.ID] = true
-			}
-		}
-		return out
-	}
-	equippedIDs := map[int]bool{}
-	for _, eq := range equipped {
-		if eq.ID > 0 {
-			equippedIDs[eq.ID] = true
-		}
-	}
-	for _, id := range a.AwakeTabletIDs {
-		if id > 0 && (len(equippedIDs) == 0 || equippedIDs[id]) {
-			out[id] = true
-		}
-	}
-	return out
 }
 
 func (a *Account) UnlockedPageSet() map[int]bool {
@@ -899,18 +783,6 @@ func (a *Account) SlotStateSnapshot() map[string]int {
 		out[key] = state
 	}
 	return out
-}
-
-func (a *Account) TabletCapacity() int {
-	if a == nil {
-		return 50
-	}
-	mu.RLock()
-	defer mu.RUnlock()
-	if a.TabletPacketSize < 25 {
-		return 50
-	}
-	return a.TabletPacketSize
 }
 
 func (a *Account) AddInscription(itemID, qty int) {
@@ -977,207 +849,59 @@ func (a *Account) ExchangeInscriptions(sourceID, targetID, sourceQty int) bool {
 	return true
 }
 
-func socketsToJSON(sockets map[int][2]int) map[string][]int {
-	out := map[string][]int{}
-	for idx, pair := range sockets {
-		if idx < 0 || pair[0] <= 0 {
-			continue
-		}
-		qty := pair[1]
-		if qty < 1 {
-			qty = 1
-		}
-		out[strconv.Itoa(idx)] = []int{pair[0], qty}
-	}
-	return out
-}
-
-func (a *Account) SetBackpackSockets(tabletID int, sockets map[int][2]int) {
-	if tabletID <= 0 {
-		return
-	}
-	clean := socketsToJSON(sockets)
-	persistMutation(a, func() {
-		if a.BackpackSockets == nil {
-			a.BackpackSockets = map[string]map[string][]int{}
-		}
-		key := strconv.Itoa(tabletID)
-		if len(clean) == 0 {
-			delete(a.BackpackSockets, key)
-		} else {
-			a.BackpackSockets[key] = clean
-		}
-		for slot, rec := range a.Tablets {
-			if rec.ID != tabletID {
-				continue
-			}
-			rec.Sockets = socketsToJSON(sockets)
-			a.Tablets[slot] = rec
-		}
-	})
-}
-
-func (a *Account) normalizeDuplicateTabletsLocked() bool {
-	if a == nil || len(a.Tablets) < 2 {
+// ExchangeInscriptionSet atomically consumes one of each source inscription
+// (duplicates count multiple times) and grants one target. Used by the 4→1
+// tier exchange (0x50) and the gold 1↔1 exchange (0x59). When payType is
+// PayEmblem or PayRune the price is debited in the same critical section and
+// the whole exchange is rejected on an insufficient balance.
+func (a *Account) ExchangeInscriptionSet(sources []int, targetID, payType, price int) bool {
+	if a == nil || targetID <= 0 || len(sources) == 0 || price < 0 {
 		return false
 	}
-	type placed struct {
-		key        string
-		page, slot int
+	mu.Lock()
+	defer mu.Unlock()
+	if a.Inscriptions == nil {
+		return false
 	}
-	placements := make([]placed, 0, len(a.Tablets))
-	for key := range a.Tablets {
-		var page, slot int
-		if _, err := fmt.Sscanf(key, "%d:%d", &page, &slot); err == nil {
-			placements = append(placements, placed{key: key, page: page, slot: slot})
+	need := map[string]int{}
+	for _, id := range sources {
+		if id <= 0 {
+			return false
 		}
+		need[strconv.Itoa(id)]++
 	}
-	sort.Slice(placements, func(i, j int) bool {
-		return placements[i].page < placements[j].page ||
-			(placements[i].page == placements[j].page && placements[i].slot < placements[j].slot)
-	})
-	seen := map[int]bool{}
-	changed := false
-	for _, p := range placements {
-		rec := a.Tablets[p.key]
-		if rec.ID <= 0 {
-			continue
-		}
-		if seen[rec.ID] {
-			delete(a.Tablets, p.key)
-			changed = true
-			continue
-		}
-		seen[rec.ID] = true
-	}
-	return changed
-}
-
-func (a *Account) EquipTablet(page, slot, tabletID int) {
-	if a == nil || tabletID <= 0 || page < 0 || page > 6 || slot < 0 || slot > 2 {
-		return
-	}
-	persistMutation(a, func() {
-		if a.Tablets == nil {
-			a.Tablets = map[string]TabletRec{}
-		}
-		targetKey := fmt.Sprintf("%d:%d", page, slot)
-		for key, rec := range a.Tablets {
-			if key != targetKey && rec.ID == tabletID {
-				delete(a.Tablets, key)
-			}
-		}
-		sockets := tabletSocketsLocked(a)[tabletID]
-		a.Tablets[targetKey] = TabletRec{
-			ID:      tabletID,
-			Sockets: socketsToJSON(sockets),
-		}
-	})
-}
-
-func removeAwakeLocked(a *Account, tabletID int) {
-	if a == nil || tabletID <= 0 || a.AwakeTabletIDs == nil {
-		return
-	}
-	out := a.AwakeTabletIDs[:0]
-	for _, id := range a.AwakeTabletIDs {
-		if id != tabletID {
-			out = append(out, id)
+	for key, n := range need {
+		if a.Inscriptions[key] < n {
+			return false
 		}
 	}
-	a.AwakeTabletIDs = append([]int(nil), out...)
-	if len(out) == 0 {
-		a.AwakeTabletIDs = []int{}
-	}
-}
-
-func (a *Account) UnequipTablet(page, slot int) int {
-	removed := 0
-	if a == nil {
-		return removed
-	}
-	persistMutation(a, func() {
-		key := fmt.Sprintf("%d:%d", page, slot)
-		if rec, ok := a.Tablets[key]; ok {
-			removed = rec.ID
-			delete(a.Tablets, key)
+	switch payType {
+	case PayEmblem:
+		if a.Emblem < price {
+			return false
 		}
-		if removed == 0 {
-			return
+		a.Emblem -= price
+	case PayRune:
+		if a.Rune < price {
+			return false
 		}
-		for _, rec := range a.Tablets {
-			if rec.ID == removed {
-				return
-			}
+		a.Rune -= price
+	default:
+		if price != 0 {
+			return false
 		}
-		removeAwakeLocked(a, removed)
-	})
-	return removed
-}
-
-func (a *Account) SetTabletAwake(tabletID int, awake bool) {
-	if a == nil || tabletID <= 0 {
-		return
 	}
-	persistMutation(a, func() {
-		cur := awakeTabletsLocked(a)
-		if awake {
-			cur[tabletID] = true
+	for key, n := range need {
+		left := a.Inscriptions[key] - n
+		if left == 0 {
+			delete(a.Inscriptions, key)
 		} else {
-			delete(cur, tabletID)
-		}
-		ids := make([]int, 0, len(cur))
-		for id := range cur {
-			ids = append(ids, id)
-		}
-		sort.Ints(ids)
-		a.AwakeTabletIDs = ids
-		if len(ids) == 0 {
-			a.AwakeTabletIDs = []int{}
-		}
-	})
-}
-
-// DeleteTablet handles trade 0x53: unequip, return socketed inscriptions and
-// drop the tablet from the backpack (it can be bought again from the shop).
-func (a *Account) DeleteTablet(tabletID int) {
-	if a == nil || tabletID <= 0 {
-		return
-	}
-	persistMutation(a, func() {
-		sockets := tabletSocketsLocked(a)[tabletID]
-		if a.Inscriptions == nil {
-			a.Inscriptions = map[string]int{}
-		}
-		for _, pair := range sockets {
-			if pair[0] <= 0 {
-				continue
-			}
-			qty := pair[1]
-			if qty < 1 {
-				qty = 1
-			}
-			a.Inscriptions[strconv.Itoa(pair[0])] += qty
-		}
-		delete(a.BackpackSockets, strconv.Itoa(tabletID))
-		for key, rec := range a.Tablets {
-			if rec.ID == tabletID {
-				delete(a.Tablets, key)
-			}
-		}
-		removeAwakeLocked(a, tabletID)
-		removeOwnedTabletLocked(a, tabletID)
-	})
-}
-
-func removeOwnedTabletLocked(a *Account, tabletID int) {
-	out := make([]int, 0, len(a.OwnedTablets))
-	for _, id := range a.OwnedTablets {
-		if id != tabletID {
-			out = append(out, id)
+			a.Inscriptions[key] = left
 		}
 	}
-	a.OwnedTablets = out
+	a.Inscriptions[strconv.Itoa(targetID)]++
+	_ = saveLocked()
+	return true
 }
 
 func (a *Account) UnlockSlot(page, slot int) {
@@ -1213,43 +937,6 @@ func (a *Account) UnlockPage(page int) []int {
 		a.UnlockedPages = append([]int(nil), pages...)
 	})
 	return pages
-}
-
-// SleepTabletWithEmblem atomically charges the unlock cost and removes one
-// tablet from the awake set. Repeating an already-completed sleep is idempotent.
-func (a *Account) SleepTabletWithEmblem(tabletID, cost int) bool {
-	return a.SleepTablet(tabletID, PayEmblem, cost)
-}
-
-// SleepTablet is SleepTabletWithEmblem for either currency the client offers
-// in its reopen dialog (PayEmblem or PayRune).
-func (a *Account) SleepTablet(tabletID, payType, cost int) bool {
-	if a == nil || tabletID <= 0 || cost < 0 {
-		return false
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	awake := awakeTabletsLocked(a)
-	if !awake[tabletID] {
-		return true
-	}
-	switch payType {
-	case PayEmblem:
-		if a.Emblem < cost {
-			return false
-		}
-		a.Emblem -= cost
-	case PayRune:
-		if a.Rune < cost {
-			return false
-		}
-		a.Rune -= cost
-	default:
-		return false
-	}
-	removeAwakeLocked(a, tabletID)
-	_ = saveLocked()
-	return true
 }
 
 func (a *Account) Debit(payType, amount int) (emblem, runeV, gems int) {
@@ -1335,7 +1022,7 @@ func (a *Account) canGrantLocked(itemID int) bool {
 		items.TypeHero:
 		return true
 	case items.TypeTablet:
-		return ownedTabletIndexLocked(a, itemID) < 0
+		return a.canGrantTabletLocked()
 	default:
 		return false
 	}
@@ -1360,9 +1047,7 @@ func (a *Account) grantLocked(itemID, qty, depth int) {
 		}
 		a.Items[key] += qty
 	case items.TypeTablet:
-		if ownedTabletIndexLocked(a, itemID) < 0 {
-			a.OwnedTablets = append(a.OwnedTablets, itemID)
-		}
+		a.grantTabletLocked(itemID, qty)
 	case items.TypePole:
 		if a.Poles == nil {
 			a.Poles = map[string]int{}
@@ -1407,7 +1092,8 @@ func (a *Account) grantLocked(itemID, qty, depth int) {
 
 // migrateInventoryLocked brings pre-inventory-v1 records forward:
 //   - Items seeded from the legacy revival_runes counter;
-//   - OwnedTablets seeded with the grant list (everything equipped stays owned);
+//   - tablet instances built from the legacy owned/backpack/awake fields
+//     (or the grant list for a brand-new record), see tablets.go;
 //   - non-inscription ids that earlier builds stored in Inscriptions
 //     (emblem packs, banners, poles, potions, bundles) are re-routed through
 //     grantLocked so players receive what they paid for.
@@ -1425,18 +1111,8 @@ func (a *Account) migrateInventoryLocked() bool {
 		a.Items[strconv.Itoa(revivalRuneItemID)] = n
 		dirty = true
 	}
-	if a.OwnedTablets == nil {
-		a.OwnedTablets = []int{}
-		if config.KitabeGrantAllTablets {
-			a.OwnedTablets = append(a.OwnedTablets, items.GrantableTabletIDs()...)
-		}
+	if ensureTabletInstancesLocked(a) {
 		dirty = true
-	}
-	for _, rec := range a.Tablets {
-		if rec.ID > 0 && ownedTabletIndexLocked(a, rec.ID) < 0 {
-			a.OwnedTablets = append(a.OwnedTablets, rec.ID)
-			dirty = true
-		}
 	}
 	if a.Poles == nil {
 		a.Poles = map[string]int{}
@@ -1461,49 +1137,11 @@ func (a *Account) migrateInventoryLocked() bool {
 		a.InventoryVersion = 1
 		dirty = true
 	}
+	if a.InventoryVersion < inventoryVersionTabletInstances {
+		a.InventoryVersion = inventoryVersionTabletInstances
+		dirty = true
+	}
 	return dirty
-}
-
-func ownedTabletIndexLocked(a *Account, tabletID int) int {
-	for i, id := range a.OwnedTablets {
-		if id == tabletID {
-			return i
-		}
-	}
-	return -1
-}
-
-// OwnedTabletIDs is the Kitabe backpack in wire order (TabletInfo vector).
-func (a *Account) OwnedTabletIDs() []int {
-	if a == nil {
-		return nil
-	}
-	mu.RLock()
-	defer mu.RUnlock()
-	return append([]int(nil), a.OwnedTablets...)
-}
-
-// OwnedTabletAt resolves a client-side tablet index (TabletSlot
-// indexIDInPacket / backpack button index) to a tablet id.
-func (a *Account) OwnedTabletAt(index int) (int, bool) {
-	if a == nil || index < 0 {
-		return 0, false
-	}
-	mu.RLock()
-	defer mu.RUnlock()
-	if index >= len(a.OwnedTablets) {
-		return 0, false
-	}
-	return a.OwnedTablets[index], true
-}
-
-func (a *Account) OwnedTabletIndex(tabletID int) int {
-	if a == nil {
-		return -1
-	}
-	mu.RLock()
-	defer mu.RUnlock()
-	return ownedTabletIndexLocked(a, tabletID)
 }
 
 // ItemCounts returns the consumable inventory (item id → quantity).
@@ -1578,22 +1216,6 @@ func (a *Account) UsePattern(patternID int) {
 			delete(a.Patterns, key)
 		}
 	})
-}
-
-func (a *Account) ExpandTabletCapacity() (current, next int) {
-	persistMutation(a, func() {
-		current = a.TabletPacketSize
-		if current < 25 {
-			current = 50
-		}
-		current = minInt(200, maxInt(current+25, 50))
-		a.TabletPacketSize = current
-		next = minInt(200, current+25)
-	})
-	if a == nil {
-		return 50, 75
-	}
-	return current, next
 }
 
 func maxInt(a, b int) int {

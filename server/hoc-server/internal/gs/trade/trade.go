@@ -2,6 +2,7 @@ package trade
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"time"
 
@@ -523,10 +524,10 @@ func handleKitabeFamily(c *Ctx) bool {
 	if c.Sub == 0x53 || c.Sub == 0x4b || c.Sub == 0x4c || c.Sub == 0x4d {
 		fmt.Printf(" [GS] kitabe %#x body=%x owned=%v\n", c.Sub, c.Body, a.OwnedTabletIDs())
 	}
-	applyKitabeMutation(c.Sub, c.Body, a)
-	body := kitabe.UnlockResponse(a)
+	reply := applyKitabeMutation(c.Sub, c.Body, a)
+	body := kitabe.UnlockResponseFull(a, 0, reply.resultItem, reply.ascended, 0, 0)
 	c.Send(c.Sub, body)
-	fmt.Printf(" [GS SENT] ★Kitabe ACK %#x (%dB)\n", c.Sub, len(body))
+	fmt.Printf(" [GS SENT] ★Kitabe ACK %#x item=%d ascended=%d (%dB)\n", c.Sub, reply.resultItem, reply.ascended, len(body))
 	return true
 }
 
@@ -564,79 +565,188 @@ func handleSleepTablet(body []byte, a *accounts.Account) (result, payType, owned
 		fmt.Printf(" [GS] ★0x4e SLEEP rejected payType=%d\n", payType)
 		return result, payType, ownedIndex, tabletID
 	}
-	tabletID, ok = a.OwnedTabletAt(index)
+	inst, ok := a.TabletAt(index)
 	if !ok {
 		fmt.Printf(" [GS] ★0x4e SLEEP rejected index=%d owned=%d body=%x\n", index, len(a.OwnedTabletIDs()), body)
 		return result, payType, ownedIndex, tabletID
 	}
+	tabletID = inst.ID
 	ownedIndex = index
-	if !a.SleepTablet(tabletID, payType, cost) {
-		fmt.Printf(" [GS] ★0x4e SLEEP rejected tablet=%d pay=%d cost=%d insufficient\n", tabletID, payType, cost)
+	if !a.SleepTablet(inst.UID, payType, cost) {
+		fmt.Printf(" [GS] ★0x4e SLEEP rejected tablet=%d uid=%d pay=%d cost=%d insufficient\n", tabletID, inst.UID, payType, cost)
 		return result, payType, ownedIndex, tabletID
 	}
 	return 0, payType, ownedIndex, tabletID
 }
 
-var inscriptionNextTier = map[int]int{
-	447: 480, 448: 482, 449: 484, 450: 486, 451: 488,
-	452: 490, 454: 513, 455: 494, 456: 496, 457: 498,
-	458: 500, 459: 502, 460: 504, 461: 506, 462: 508, 463: 510,
-	480: 481, 482: 483, 484: 485, 486: 487, 488: 489,
-	490: 491, 513: 493, 494: 495, 496: 497, 498: 499,
-	500: 501, 502: 503, 504: 505, 506: 507, 508: 509, 510: 511,
+// Inscription tiers (item_prototype_hoc.tbl, 16 stats each). The EXCHANGE
+// page trades 4 inscriptions of one tier for ONE RANDOM inscription of the
+// next tier (the result slot shows a "?"); the third panel swaps one gold for
+// a chosen gold against emblems/runes. The event golds 1044-1050 are never
+// produced by an exchange.
+const (
+	inscriptionTierBronze = 1
+	inscriptionTierSilver = 2
+	inscriptionTierGold   = 3
+)
+
+var inscriptionTiers = map[int][]int{
+	inscriptionTierBronze: {447, 448, 449, 450, 451, 452, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463},
+	inscriptionTierSilver: {480, 482, 484, 486, 488, 490, 513, 494, 496, 498, 500, 502, 504, 506, 508, 510},
+	inscriptionTierGold:   {481, 483, 485, 487, 489, 491, 493, 495, 497, 499, 501, 503, 505, 507, 509, 511},
 }
 
-func mergeInscriptionSource(arr []any) (sourceID, targetID int, ok bool) {
-	// Captured 0x50 layout: [26, username, 0, vector<InscriptionInfo>, 6].
-	if len(arr) < 4 {
-		return 0, 0, false
+func inscriptionTierOf(id int) int {
+	for tier, ids := range inscriptionTiers {
+		for _, v := range ids {
+			if v == id {
+				return tier
+			}
+		}
 	}
-	rows, ok := arr[3].([]any)
-	if !ok || len(rows) != 4 {
-		return 0, 0, false
+	return 0
+}
+
+// randomInscription picks the exchange result; swapped by tests.
+var randomInscription = func(pool []int) int {
+	return pool[rand.Intn(len(pool))]
+}
+
+// inscriptionRows reads a vector<InscriptionInfo> and returns the item ids.
+func inscriptionRows(v any) ([]int, bool) {
+	rows, ok := v.([]any)
+	if !ok {
+		return nil, false
 	}
-	for i, raw := range rows {
+	out := make([]int, 0, len(rows))
+	for _, raw := range rows {
 		row, ok := raw.([]any)
 		if !ok || len(row) == 0 {
-			return 0, 0, false
+			return nil, false
 		}
 		id, ok := asInt(row[0])
-		if !ok || id <= 0 || (i > 0 && id != sourceID) {
-			return 0, 0, false
+		if !ok || id <= 0 {
+			return nil, false
 		}
-		sourceID = id
+		out = append(out, id)
 	}
-	targetID, ok = inscriptionNextTier[sourceID]
-	return sourceID, targetID, ok
+	return out, true
 }
 
-func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
+// mergeInscriptionSource parses 0x50 ([26, username, 0, vector<InscriptionInfo>,
+// uid]): four inscriptions of one bronze/silver tier, any stats. Returns the
+// consumed ids and a random inscription of the next tier.
+func mergeInscriptionSource(arr []any) (sources []int, targetID int, ok bool) {
+	if len(arr) < 4 {
+		return nil, 0, false
+	}
+	sources, ok = inscriptionRows(arr[3])
+	if !ok || len(sources) != 4 {
+		return nil, 0, false
+	}
+	tier := inscriptionTierOf(sources[0])
+	for _, id := range sources[1:] {
+		if inscriptionTierOf(id) != tier {
+			return nil, 0, false
+		}
+	}
+	next, ok := inscriptionTiers[tier+1]
+	if !ok || tier == 0 {
+		return nil, 0, false
+	}
+	return sources, randomInscription(next), true
+}
+
+// exchangeGoldSource parses 0x59 (TradeMessageExchangeGoldInscriptions,
+// live capture 2026-09-18: [26, name, targetItemID, payType,
+// vector[sourceInscriptionInfo], uid]). The price is not on the wire — the
+// client only checks its wallet against UserInfo+0x310/+0x314 — so the
+// server charges its own config price for payType.
+func exchangeGoldSource(arr []any) (sourceID, targetID, payType int, ok bool) {
+	if len(arr) < 5 {
+		return 0, 0, 0, false
+	}
+	targetID, _ = asInt(arr[2])
+	payType, _ = asInt(arr[3])
+	rows, ok := inscriptionRows(arr[4])
+	if !ok || len(rows) != 1 {
+		return 0, 0, 0, false
+	}
+	sourceID = rows[0]
+	if sourceID == targetID ||
+		inscriptionTierOf(sourceID) != inscriptionTierGold ||
+		inscriptionTierOf(targetID) != inscriptionTierGold {
+		return 0, 0, 0, false
+	}
+	return sourceID, targetID, payType, true
+}
+
+// kitabeReply carries the per-operation ints of the Unlock family reply
+// (kitabe.UnlockResponseFull [6] and [7]).
+type kitabeReply struct {
+	resultItem int // [6]: inscription produced by 0x50 / 0x59
+	ascended   int // [7]: 1 when a 0x4f request ascended its tablet
+}
+
+// applyKitabeMutation applies one Kitabe request to the account and returns
+// the reply's per-operation fields.
+func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) (reply kitabeReply) {
 	if a == nil || len(body) == 0 {
-		return
+		return reply
 	}
 	rq, err := msgpack.Decode(body)
 	if err != nil {
-		return
+		return reply
 	}
 	arr, ok := rq.([]any)
 	if !ok {
-		return
+		return reply
 	}
 	page0 := a.SelectedPage0()
-	ids := a.OwnedTabletIDs()
+	owned := a.OwnedTabletViews()
+	// tabletAt resolves a client owned-vector index to the instance.
+	tabletAt := func(idx *int) (accounts.TabletView, bool) {
+		if idx == nil || *idx < 0 || *idx >= len(owned) {
+			return accounts.TabletView{}, false
+		}
+		return owned[*idx], true
+	}
 
 	switch sub {
 	case 0x50:
-		sourceID, targetID, ok := mergeInscriptionSource(arr)
+		sources, targetID, ok := mergeInscriptionSource(arr)
 		if !ok {
-			fmt.Printf(" [GS] ★0x50 MERGE rejected malformed/unknown recipe\n")
-			return
+			fmt.Printf(" [GS] ★0x50 MERGE rejected malformed/mixed tiers body=%x\n", body)
+			return reply
 		}
-		if !a.ExchangeInscriptions(sourceID, targetID, 4) {
-			fmt.Printf(" [GS] ★0x50 MERGE rejected source=%d target=%d insufficient\n", sourceID, targetID)
-			return
+		if !a.ExchangeInscriptionSet(sources, targetID, 0, 0) {
+			fmt.Printf(" [GS] ★0x50 MERGE rejected sources=%v insufficient\n", sources)
+			return reply
 		}
-		fmt.Printf(" [GS] ★0x50 MERGE source=%d x4 target=%d x1\n", sourceID, targetID)
+		reply.resultItem = targetID
+		fmt.Printf(" [GS] ★0x50 MERGE sources=%v → %d (%s)\n", sources, targetID, items.Name(targetID))
+	case 0x59:
+		sourceID, targetID, payType, ok := exchangeGoldSource(arr)
+		if !ok {
+			fmt.Printf(" [GS] ★0x59 EXCHANGE_GOLD rejected malformed body=%x\n", body)
+			return reply
+		}
+		price := 0
+		switch payType {
+		case accounts.PayEmblem:
+			price = config.KitabeExchangeGoldEmblem
+		case accounts.PayRune:
+			price = config.KitabeExchangeGoldRune
+		default:
+			fmt.Printf(" [GS] ★0x59 EXCHANGE_GOLD rejected payType=%d\n", payType)
+			return reply
+		}
+		if !a.ExchangeInscriptionSet([]int{sourceID}, targetID, payType, price) {
+			fmt.Printf(" [GS] ★0x59 EXCHANGE_GOLD rejected source=%d target=%d pay=%d insufficient\n", sourceID, targetID, payType)
+			return reply
+		}
+		reply.resultItem = targetID
+		fmt.Printf(" [GS] ★0x59 EXCHANGE_GOLD %d → %d (%s) pay=%d price=%d\n", sourceID, targetID, items.Name(targetID), payType, price)
 	case 0x4b:
 		page, slot, idx := kitabeWirePageSlot(arr, page0, "slot_first")
 		if slot == nil {
@@ -650,11 +760,14 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 			}
 		}
 		a.SetSelectedPage(page + 1)
-		if slot != nil && idx != nil && *idx >= 0 && *idx < len(ids) {
-			tid := ids[*idx]
-			a.EquipTablet(page, *slot, tid)
-			a.SetTabletAwake(tid, true)
-			fmt.Printf(" [GS] ★0x4b WEAR id=%d page=%d slot=%d\n", tid, page, *slot)
+		if inst, ok := tabletAt(idx); ok && slot != nil {
+			// Wearing never ascends. TabletInfo[8]==2 ("Ascended": locked
+			// for editing, passive active in match) is granted only by the
+			// 0x4f ascend flag below. Auto-waking here locked every equipped
+			// tablet and made a paid 0x4e unlock moot as soon as the player
+			// re-equipped the tablet on another page.
+			a.EquipTablet(page, *slot, inst.UID)
+			fmt.Printf(" [GS] ★0x4b WEAR id=%d uid=%d index=%d page=%d slot=%d ascended=%v\n", inst.ID, inst.UID, inst.Index, page, *slot, inst.Awake)
 		}
 	case 0x4c:
 		page, slot, _ := kitabeWirePageSlot(arr, page0, "slot_first")
@@ -669,38 +782,28 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 			fmt.Printf(" [GS] ★0x4c UNEQUIP page=%d slot=%d\n", page, *slot)
 		}
 	case 0x4d:
-		// SendWakeTabletRequest: [26, name, slotIdx, ownedIndex, page1, uid]
-		// (field order not yet captured live — the normal flow wakes through
-		// 0x4b — so accept whichever of [2]/[3] names an equipped tablet).
-		tid := 0
-		equippedIDs := map[int]bool{}
-		for _, e := range a.EquippedTablets() {
-			equippedIDs[e.ID] = true
-		}
+		// SendWakeTabletRequest has no caller in the client (ascension goes
+		// through the 0x4f ascend flag); kept for completeness:
+		// [26, name, slotIdx, ownedIndex, page1, uid].
+		var target *accounts.TabletView
 		for _, pos := range []int{3, 2} {
 			if len(arr) > pos {
-				if idx, ok := asInt(arr[pos]); ok && idx >= 0 && idx < len(ids) && equippedIDs[ids[idx]] {
-					tid = ids[idx]
-					break
+				if idx, ok := asInt(arr[pos]); ok {
+					if inst, ok := tabletAt(&idx); ok {
+						target = &inst
+						break
+					}
 				}
 			}
 		}
 		if len(arr) > 4 {
 			if v, ok := asInt(arr[4]); ok && v >= 1 && v <= 7 {
 				a.SetSelectedPage(v)
-				page0 = v - 1
 			}
 		}
-		if tid == 0 {
-			if slot, ok := asInt(arrElem(arr, 2)); ok {
-				if e, ok := a.EquippedTablets()[[2]int{page0, slot}]; ok {
-					tid = e.ID
-				}
-			}
-		}
-		if tid != 0 {
-			a.SetTabletAwake(tid, true)
-			fmt.Printf(" [GS] ★0x4d WAKE tid=%d\n", tid)
+		if target != nil {
+			a.SetTabletAwake(target.UID, true)
+			fmt.Printf(" [GS] ★0x4d WAKE id=%d uid=%d\n", target.ID, target.UID)
 		}
 	case 0x4a:
 		if len(arr) >= 3 {
@@ -732,11 +835,37 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 		page, _, idx := kitabeWirePageSlot(arr, page0, "insc")
 		a.SetSelectedPage(page + 1)
 		tid, socks := parseTabletInfoSockets(arr)
-		if tid == 0 && idx != nil && *idx >= 0 && *idx < len(ids) {
-			tid = ids[*idx]
+		// [3] is the owned-vector index of the copy being edited
+		// (DlgTabletPage copies TabletButton+0x400 into
+		// DlgInscriptionPage+0xb0c); with several copies of one tablet it
+		// is the only thing that tells them apart. Fall back to the first
+		// copy of the TabletInfo id when the index is missing/-1.
+		var target *accounts.TabletView
+		if inst, ok := tabletAt(idx); ok && (tid == 0 || inst.ID == tid) {
+			target = &inst
+		} else {
+			for i := range owned {
+				if owned[i].ID == tid {
+					target = &owned[i]
+					break
+				}
+			}
 		}
-		if tid != 0 {
-			old := a.TabletSockets()[tid]
+		// SendFillInscriptionSlotRequest is define_array<int,string,int,int,
+		// TabletInfo,int,int,int> = [26, name, 1, idx, TabletInfo, ascend,
+		// uid, page1]. DlgInscriptionPage::OnClickedConfirmBox sends
+		// ascend=1 only after the "Do you want to ascend this tablet?"
+		// confirm (both energy bars full and TabletInfo+0x34 != 2); the
+		// plain "save your modification" path sends 0. 0x51 has no such field.
+		ascend := false
+		if sub == 0x4f && len(arr) > 5 {
+			if v, ok := asInt(arr[5]); ok && v != 0 {
+				ascend = true
+			}
+		}
+		if target != nil {
+			tid = target.ID
+			old := target.Sockets
 			keep := map[int]bool{}
 			for _, p := range socks {
 				keep[p[0]] = true
@@ -751,8 +880,12 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 					a.AddInscription(oid, qty)
 				}
 			}
-			a.SetBackpackSockets(tid, socks)
-			fmt.Printf(" [GS] ★%#x SOCKET tablet=%d n=%d\n", sub, tid, len(socks))
+			a.SetBackpackSockets(target.UID, socks)
+			if ascend && len(socks) > 0 {
+				a.SetTabletAwake(target.UID, true)
+				reply.ascended = 1
+			}
+			fmt.Printf(" [GS] ★%#x SOCKET tablet=%d uid=%d index=%d n=%d ascend=%v\n", sub, tid, target.UID, target.Index, len(socks), ascend)
 		}
 	case 0x52:
 		if len(arr) >= 3 {
@@ -770,10 +903,12 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 		// SendDeleteTabletRequest, live capture 2026-09-13:
 		// [26, name, ownedIndex, 1, uid, page1] — unlike 0x4e the index is
 		// packed before the constant 1.
-		tid := 0
+		var target *accounts.TabletView
 		if len(arr) > 2 {
-			if idx, ok := asInt(arr[2]); ok && idx >= 0 && idx < len(ids) {
-				tid = ids[idx]
+			if idx, ok := asInt(arr[2]); ok {
+				if inst, ok := tabletAt(&idx); ok {
+					target = &inst
+				}
 			}
 		}
 		if len(arr) > 5 {
@@ -781,13 +916,14 @@ func applyKitabeMutation(sub uint16, body []byte, a *accounts.Account) {
 				a.SetSelectedPage(v)
 			}
 		}
-		if tid != 0 {
-			a.DeleteTablet(tid)
-			fmt.Printf(" [GS] ★0x53 DELETE_TABLET id=%d index=%v\n", tid, arr[2])
+		if target != nil {
+			a.DeleteTablet(target.UID)
+			fmt.Printf(" [GS] ★0x53 DELETE_TABLET id=%d uid=%d index=%d\n", target.ID, target.UID, target.Index)
 		} else {
 			fmt.Printf(" [GS] ★0x53 DELETE_TABLET rejected body=%x\n", body)
 		}
 	}
+	return reply
 }
 
 func arrElem(arr []any, i int) any {

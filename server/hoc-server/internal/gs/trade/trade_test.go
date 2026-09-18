@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"hoc-server/internal/accounts"
+	"hoc-server/internal/config"
+	"hoc-server/internal/domain/kitabe"
 	"hoc-server/internal/session"
 	"hoc-server/internal/wire/msgpack"
 )
@@ -154,37 +156,81 @@ func inscriptionQty(a *accounts.Account, itemID int) int {
 	return 0
 }
 
+// capturedMergeBody is the live 0x50 request: [26, "tester", 0, 4×InscriptionInfo(494), 6].
+func capturedMergeBody(t *testing.T) []byte {
+	t.Helper()
+	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+// setMergeSource rewrites the n-th (1-based, 0 = all) source id in
+// capturedMergeBody (all four are msgpack uint16 494 = cd 01 ee).
+func setMergeSource(body []byte, n int, id int) {
+	hits := 0
+	for i := 0; i+3 < len(body); i++ {
+		// each row is a 13-elem array (0x9d) whose first field is a uint16
+		if body[i] == 0x9d && body[i+1] == 0xcd {
+			hits++
+			if n == 0 || hits == n {
+				body[i+2] = byte(id >> 8)
+				body[i+3] = byte(id)
+			}
+		}
+	}
+}
+
+func fixedRandomInscription(t *testing.T, pick int) {
+	t.Helper()
+	prev := randomInscription
+	randomInscription = func(pool []int) int {
+		for _, id := range pool {
+			if id == pick {
+				return pick
+			}
+		}
+		t.Fatalf("pick %d not in pool %v", pick, pool)
+		return 0
+	}
+	t.Cleanup(func() { randomInscription = prev })
+}
+
+func replyField6(t *testing.T, reply []byte) int64 {
+	t.Helper()
+	v, err := msgpack.Decode(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, ok := v.([]any)
+	if !ok || len(top) != 11 {
+		t.Fatalf("reply is not the 11-elem Unlock family: %#v", v)
+	}
+	n, _ := top[6].(int64)
+	return n
+}
+
 func TestMergeInscriptionCapturedSilverToGold(t *testing.T) {
 	a := loadTradeAccount(t, map[string]any{
 		"username": "tester", "password": "pw",
 		"inscriptions": map[string]int{"494": 8},
 	})
-	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := msgpack.Decode(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("captured merge request=%#v", decoded)
+	fixedRandomInscription(t, 483) // any gold; the exchange result is random
 	var reply []byte
 	handleKitabeFamily(&Ctx{
-		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Sess: &session.Session{Account: a}, Body: capturedMergeBody(t), Sub: 0x50,
 		Send: func(_ uint16, b []byte) { reply = b },
 	})
 	if got := inscriptionQty(a, 494); got != 4 {
 		t.Fatalf("source 494 qty=%d, want 4", got)
 	}
-	if got := inscriptionQty(a, 495); got != 1 {
-		t.Fatalf("target 495 qty=%d, want 1", got)
+	if got := inscriptionQty(a, 483); got != 1 {
+		t.Fatalf("target 483 qty=%d, want 1", got)
 	}
-	v, err := msgpack.Decode(reply)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if top := v.([]any); len(top) != 11 {
-		t.Fatalf("reply len=%d, want full Kitabe response", len(top))
+	// [6] carries the produced item: onMergeInscriptionResponse shows it.
+	if got := replyField6(t, reply); got != 483 {
+		t.Fatalf("reply[6]=%d, want 483", got)
 	}
 }
 
@@ -193,15 +239,9 @@ func TestMergeInscriptionBronzeToSilver(t *testing.T) {
 		"username": "tester", "password": "pw",
 		"inscriptions": map[string]int{"455": 4},
 	})
-	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i+2 < len(body); i++ {
-		if body[i] == 0xcd && body[i+1] == 0x01 && body[i+2] == 0xee {
-			body[i+2] = 0xc7
-		}
-	}
+	fixedRandomInscription(t, 504)
+	body := capturedMergeBody(t)
+	setMergeSource(body, 0, 455)
 	handleKitabeFamily(&Ctx{
 		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
 		Send: func(_ uint16, _ []byte) {},
@@ -209,36 +249,162 @@ func TestMergeInscriptionBronzeToSilver(t *testing.T) {
 	if got := inscriptionQty(a, 455); got != 0 {
 		t.Fatalf("source 455 qty=%d, want 0", got)
 	}
-	if got := inscriptionQty(a, 494); got != 1 {
-		t.Fatalf("target 494 qty=%d, want 1", got)
+	if got := inscriptionQty(a, 504); got != 1 {
+		t.Fatalf("target 504 qty=%d, want 1", got)
 	}
 }
 
-func TestMergeInscriptionRejectsMixedSources(t *testing.T) {
+// Four different inscriptions of one tier are a valid exchange (the EXCHANGE
+// page lets the player mix stats; only the tier must match).
+func TestMergeInscriptionAcceptsMixedStatsOfOneTier(t *testing.T) {
 	a := loadTradeAccount(t, map[string]any{
 		"username": "tester", "password": "pw",
-		"inscriptions": map[string]int{"494": 4, "498": 1},
+		"inscriptions": map[string]int{"494": 2, "498": 1, "504": 1},
 	})
-	body, err := hex.DecodeString("951aa674657374657200949dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca0000000000000190909dcd01ee00000000c300ca00000000000001909006")
+	fixedRandomInscription(t, 495)
+	body := capturedMergeBody(t)
+	setMergeSource(body, 3, 498)
+	setMergeSource(body, 4, 504)
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if inscriptionQty(a, 494) != 0 || inscriptionQty(a, 498) != 0 || inscriptionQty(a, 504) != 0 {
+		t.Fatalf("sources not consumed: %#v", a.InscriptionPairs())
+	}
+	if got := inscriptionQty(a, 495); got != 1 {
+		t.Fatalf("target 495 qty=%d, want 1", got)
+	}
+	if got := replyField6(t, reply); got != 495 {
+		t.Fatalf("reply[6]=%d, want 495", got)
+	}
+}
+
+func TestMergeInscriptionRejectsMixedTiers(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"inscriptions": map[string]int{"494": 3, "455": 1},
+	})
+	body := capturedMergeBody(t)
+	setMergeSource(body, 4, 455) // bronze among silvers
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if inscriptionQty(a, 494) != 3 || inscriptionQty(a, 455) != 1 {
+		t.Fatalf("mixed-tier request mutated inventory: %#v", a.InscriptionPairs())
+	}
+	if got := replyField6(t, reply); got != 0 {
+		t.Fatalf("reply[6]=%d, want 0", got)
+	}
+}
+
+func TestMergeInscriptionRejectsInsufficientInventory(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"inscriptions": map[string]int{"494": 3},
+	})
+	fixedRandomInscription(t, 495)
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: capturedMergeBody(t), Sub: 0x50,
+		Send: func(_ uint16, _ []byte) {},
+	})
+	if inscriptionQty(a, 494) != 3 || inscriptionQty(a, 495) != 0 {
+		t.Fatalf("insufficient request mutated inventory: %#v", a.InscriptionPairs())
+	}
+}
+
+// exchangeGoldBody builds 0x59 as captured live (2026-09-18):
+// 961aa57465737461cd01ff02919dcd01e3... = [26, name, targetID, payType,
+// vector[InscriptionInfo(source)], uid].
+func exchangeGoldBody(payType, source, target int) []byte {
+	row := msgpack.FixArray(13)
+	row = append(row, msgpack.Int(int64(source))...)
+	for i := 0; i < 4; i++ {
+		row = append(row, msgpack.Int(0)...)
+	}
+	row = append(row, msgpack.Bool(true)...)
+	row = append(row, msgpack.Int(0)...)
+	row = append(row, msgpack.Float32(0)...)
+	row = append(row, msgpack.Int(0)...)
+	row = append(row, msgpack.Int(0)...)
+	row = append(row, msgpack.Int(1)...)
+	row = append(row, msgpack.EmptyArray()...)
+	row = append(row, msgpack.EmptyArray()...)
+	vec := append(msgpack.FixArray(1), row...)
+	return tradeArray(
+		msgpack.Int(26), msgpack.RawStr([]byte("tester")), msgpack.Int(int64(target)),
+		msgpack.Int(int64(payType)), vec, msgpack.Int(6),
+	)
+}
+
+func TestExchangeGoldCapturedWireLayout(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw", "emblem": 1000, "rune": 50,
+		"inscriptions": map[string]int{"483": 1, "511": 1},
+	})
+	// Live capture, username swapped for the test account.
+	body, err := hex.DecodeString("961aa674657374657" + "2" + "cd01ff02919dcd01e300000000c300ca00000000000001909006")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Change only the fourth source from 494 to 498.
-	hits := 0
-	for i := 0; i+2 < len(body); i++ {
-		if body[i] == 0xcd && body[i+1] == 0x01 && body[i+2] == 0xee {
-			hits++
-			if hits == 4 {
-				body[i+2] = 0xf2
-			}
-		}
-	}
 	handleKitabeFamily(&Ctx{
-		Sess: &session.Session{Account: a}, Body: body, Sub: 0x50,
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x59,
 		Send: func(_ uint16, _ []byte) {},
 	})
-	if inscriptionQty(a, 494) != 4 || inscriptionQty(a, 498) != 1 || inscriptionQty(a, 495) != 0 {
-		t.Fatalf("mixed request mutated inventory: %#v", a.InscriptionPairs())
+	if _, runeV, _ := a.Wallet(); runeV != 50-config.KitabeExchangeGoldRune {
+		t.Fatalf("rune=%d", runeV)
+	}
+	if inscriptionQty(a, 483) != 0 || inscriptionQty(a, 511) != 2 {
+		t.Fatalf("captured exchange not applied: %#v", a.InscriptionPairs())
+	}
+}
+
+func TestExchangeGoldInscriptionDebitsAndSwaps(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw", "emblem": 1000, "rune": 50,
+		"inscriptions": map[string]int{"495": 1},
+	})
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a},
+		Body: exchangeGoldBody(accounts.PayEmblem, 495, 483), Sub: 0x59,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if emblem, runeV, _ := a.Wallet(); emblem != 1000-config.KitabeExchangeGoldEmblem || runeV != 50 {
+		t.Fatalf("wallet emblem=%d rune=%d", emblem, runeV)
+	}
+	if inscriptionQty(a, 495) != 0 || inscriptionQty(a, 483) != 1 {
+		t.Fatalf("exchange not applied: %#v", a.InscriptionPairs())
+	}
+	if got := replyField6(t, reply); got != 483 {
+		t.Fatalf("reply[6]=%d, want 483", got)
+	}
+}
+
+func TestExchangeGoldInscriptionRejectsBadRequests(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw", "emblem": 1000, "rune": 50,
+		"inscriptions": map[string]int{"495": 1, "494": 1},
+	})
+	for name, body := range map[string][]byte{
+		"silver source": exchangeGoldBody(accounts.PayRune, 494, 483),
+		"silver target": exchangeGoldBody(accounts.PayRune, 495, 494),
+		"same item":     exchangeGoldBody(accounts.PayRune, 495, 495),
+		"unknown pay":   exchangeGoldBody(9, 495, 483),
+	} {
+		handleKitabeFamily(&Ctx{
+			Sess: &session.Session{Account: a}, Body: body, Sub: 0x59,
+			Send: func(_ uint16, _ []byte) {},
+		})
+		if emblem, runeV, _ := a.Wallet(); emblem != 1000 || runeV != 50 {
+			t.Fatalf("%s: wallet changed emblem=%d rune=%d", name, emblem, runeV)
+		}
+		if inscriptionQty(a, 495) != 1 || inscriptionQty(a, 494) != 1 || inscriptionQty(a, 483) != 0 {
+			t.Fatalf("%s: inventory changed: %#v", name, a.InscriptionPairs())
+		}
 	}
 }
 
@@ -464,5 +630,126 @@ func TestBuyItemCRMPackDebitsLineTotalOnce(t *testing.T) {
 	}
 	if a.PatternCounts()[573] != 50 {
 		t.Fatalf("patterns=%v", a.PatternCounts())
+	}
+}
+
+// fillInscriptionBody builds SendFillInscriptionSlotRequest:
+// [26, name, 1, ownedIndex, TabletInfo, ascend, uid, page1].
+func fillInscriptionBody(tabletID, ownedIndex int, sockets map[int][2]int, ascend, page1 int) []byte {
+	return tradeArray(
+		msgpack.Int(26), msgpack.RawStr([]byte("tester")), msgpack.Int(1),
+		msgpack.Int(int64(ownedIndex)), kitabe.TabletInfo(tabletID, sockets, false),
+		msgpack.Int(int64(ascend)), msgpack.Int(6), msgpack.Int(int64(page1)),
+	)
+}
+
+func replyField7(t *testing.T, reply []byte) int64 {
+	t.Helper()
+	v, err := msgpack.Decode(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, ok := v.([]any)
+	if !ok || len(top) != 11 {
+		t.Fatalf("reply is not the 11-elem Unlock family: %#v", v)
+	}
+	n, _ := top[7].(int64)
+	return n
+}
+
+func TestWearDoesNotAscendTablet(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"owned_tablets": []int{453, 464},
+		"tablets":       map[string]any{"0:0": map[string]any{"id": 453}},
+		"awake_tablets": []int{},
+	})
+	// SendFillTabletSlotRequest (live): [26, name, slot, ownedIndex, uid, page1]
+	body := tradeArray(
+		msgpack.Int(26), msgpack.RawStr([]byte("tester")), msgpack.Int(1),
+		msgpack.Int(1), msgpack.Int(6), msgpack.Int(2),
+	)
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: body, Sub: 0x4b,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if eq, ok := a.EquippedTablets()[[2]int{1, 1}]; !ok || eq.ID != 464 {
+		t.Fatalf("tablet 464 not equipped on page 2 slot 1: %#v", a.EquippedTablets())
+	}
+	if a.AwakeTablets()[464] {
+		t.Fatal("wearing a tablet must not ascend it")
+	}
+	if got := replyField7(t, reply); got != 0 {
+		t.Fatalf("reply[7]=%d, want 0 for a plain wear", got)
+	}
+}
+
+func TestFillInscriptionSaveKeepsTabletUnascended(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"owned_tablets": []int{453},
+		"tablets":       map[string]any{"0:0": map[string]any{"id": 453}},
+		"awake_tablets": []int{},
+		"inscriptions":  map[string]int{"494": 4},
+	})
+	socks := map[int][2]int{0: {494, 1}, 1: {494, 1}}
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: fillInscriptionBody(453, 0, socks, 0, 1), Sub: 0x4f,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if got := a.TabletSockets()[453]; len(got) != 2 || got[0][0] != 494 || got[1][0] != 494 {
+		t.Fatalf("sockets not applied: %#v", got)
+	}
+	if a.AwakeTablets()[453] {
+		t.Fatal("ascend=0 save must leave the tablet unascended")
+	}
+	if got := replyField7(t, reply); got != 0 {
+		t.Fatalf("reply[7]=%d, want 0 (return to tablet page)", got)
+	}
+}
+
+func TestFillInscriptionAscendFlagAscendsAndEchoesField7(t *testing.T) {
+	a := loadTradeAccount(t, map[string]any{
+		"username": "tester", "password": "pw",
+		"owned_tablets": []int{453},
+		"tablets":       map[string]any{"0:0": map[string]any{"id": 453}},
+		"awake_tablets": []int{},
+		"inscriptions":  map[string]int{"494": 4},
+	})
+	socks := map[int][2]int{0: {494, 1}, 1: {494, 1}, 2: {494, 1}, 3: {494, 1}}
+	var reply []byte
+	handleKitabeFamily(&Ctx{
+		Sess: &session.Session{Account: a}, Body: fillInscriptionBody(453, 0, socks, 1, 1), Sub: 0x4f,
+		Send: func(_ uint16, b []byte) { reply = b },
+	})
+	if !a.AwakeTablets()[453] {
+		t.Fatal("ascend=1 save must ascend the tablet")
+	}
+	if got := replyField7(t, reply); got != 1 {
+		t.Fatalf("reply[7]=%d, want 1 (client stays on the page and plays the ascension)", got)
+	}
+	// The ascended tablet is reported as awake in both the equipped and the
+	// owned vectors, and the ascension survives a page change.
+	v, _ := msgpack.Decode(reply)
+	top := v.([]any)
+	slots := top[4].([]any)
+	if len(slots) != 1 || slots[0].([]any)[0].([]any)[8] != int64(2) {
+		t.Fatalf("equipped TabletInfo[8] != 2: %#v", slots)
+	}
+	owned := top[5].([]any)
+	if len(owned) != 1 || owned[0].([]any)[8] != int64(2) {
+		t.Fatalf("owned TabletInfo[8] != 2: %#v", owned)
+	}
+	a.UnequipTablet(0, 0)
+	if !a.AwakeTablets()[453] {
+		t.Fatal("unequipping must not clear a paid-to-unlock ascension")
+	}
+	// Re-wearing on another page keeps it ascended, but does not ascend a
+	// second, never-ascended tablet.
+	a.EquipTablet(1, 0, 453)
+	if !a.AwakeTablets()[453] {
+		t.Fatal("re-equipped tablet lost its ascension")
 	}
 }

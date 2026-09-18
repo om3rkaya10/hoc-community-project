@@ -66,12 +66,12 @@ func TestMigrationReroutesPollutedInscriptions(t *testing.T) {
 	if a.Items["146"] != 1+3 || a.Items["518"] != 2 || a.Items["141"] != 42 {
 		t.Fatalf("items=%v", a.Items)
 	}
-	if a.InventoryVersion != 1 {
+	if a.InventoryVersion != inventoryVersionTabletInstances {
 		t.Fatalf("version=%d", a.InventoryVersion)
 	}
 	grant := items.GrantableTabletIDs()
-	if len(a.OwnedTablets) != len(grant) || a.OwnedTablets[1] != 464 {
-		t.Fatalf("owned tablets=%v", a.OwnedTablets)
+	if len(a.OwnedTablets) != len(grant) || a.OwnedTablets[1] != 464 || len(a.TabletInstances) != len(grant) {
+		t.Fatalf("owned tablets=%v instances=%d", a.OwnedTablets, len(a.TabletInstances))
 	}
 }
 
@@ -106,18 +106,27 @@ func TestPurchaseRoutesByType(t *testing.T) {
 	if !a.Purchase(141, 5, PayEmblem, 10) || a.Items["141"] != 99+5 {
 		t.Fatalf("consumable: items=%v", a.Items)
 	}
-	// Every grant-list tablet is already owned: no charge, no duplicate.
+	// Tablets are instances: buying an owned tablet adds a second copy at
+	// the end of the owned vector (inventory v2), charged like any item.
 	before := a.Emblem
-	if a.Purchase(453, 1, PayEmblem, 500) || a.Emblem != before {
-		t.Fatal("owned tablet must not be charged")
+	n := len(a.OwnedTabletIDs())
+	if !a.Purchase(453, 1, PayEmblem, 500) || a.Emblem != before-500 {
+		t.Fatalf("second copy purchase: emblem=%d", a.Emblem)
 	}
-	a.DeleteTablet(453)
-	if a.OwnedTabletIndex(453) != -1 {
-		t.Fatal("delete did not remove ownership")
+	if a.OwnedTabletCount(453) != 2 || len(a.OwnedTabletIDs()) != n+1 || a.OwnedTabletIDs()[n] != 453 {
+		t.Fatalf("second copy not appended: owned=%v", a.OwnedTabletIDs())
 	}
-	if !a.Purchase(453, 1, PayEmblem, 500) || a.OwnedTabletIndex(453) != len(a.OwnedTablets)-1 {
-		t.Fatalf("re-buy: owned=%v", a.OwnedTablets)
+	first, _ := a.TabletAt(a.OwnedTabletIndex(453))
+	a.DeleteTablet(first.UID)
+	if a.OwnedTabletCount(453) != 1 || len(a.OwnedTabletIDs()) != n {
+		t.Fatalf("delete of one copy: owned=%v", a.OwnedTabletIDs())
 	}
+	// The loft capacity caps purchases.
+	a.TabletPacketSize = len(a.OwnedTabletIDs())
+	if a.Purchase(453, 1, PayEmblem, 500) {
+		t.Fatal("purchase over loft capacity must fail")
+	}
+	a.TabletPacketSize = 0
 	if a.Purchase(238, 1, PayEmblem, 100) { // skin: unsupported → not charged
 		t.Fatal("unsupported item was charged")
 	}

@@ -8,7 +8,7 @@ The `server/hoc-server/` directory contains the independently written Go communi
 
 | Package | Role |
 |---|---|
-| `internal/accounts` | temporary accounts, profile identity, token lifecycle |
+| `internal/accounts` | temporary accounts, profile identity, token lifecycle, inventory (tablet copies in `tablets.go`) |
 | `internal/edge` | HTTP/TLS edge and authorization/profile/config responses |
 | `internal/lobby` | room create/join/leave and server advertisement |
 | `internal/gs` | game-server login, seats, ready/load/start, player actions |
@@ -18,6 +18,7 @@ The `server/hoc-server/` directory contains the independently written Go communi
 | `internal/wire/gs` | independently written game-server builders/parsers |
 | `internal/wire/msgpack` | protocol utility |
 | `internal/netx` | bounded in-match writes for WAN peers |
+| `cmd/clear-ascension` | one-shot maintenance tool: clears every tablet ascension flag in an account store (run with the server stopped; writes a backup next to the file) |
 
 ## Deterministic checks
 

@@ -115,17 +115,24 @@ func TestCollectionCatalogDefaultAndExplicitEmpty(t *testing.T) {
 	}
 }
 
-func TestAwakeNilMeansLegacyAutoButEmptyMeansAsleep(t *testing.T) {
+func TestAwakeNilAndEmptyBothMeanNotAscended(t *testing.T) {
 	tablets := map[string]accounts.TabletRec{
 		"0:0": {ID: 453, Sockets: map[string][]int{}},
 	}
-	legacy := &accounts.Account{Tablets: tablets, AwakeTabletIDs: nil}
-	if !legacy.AwakeTablets()[453] {
-		t.Fatal("nil awake list must auto-wake equipped legacy tablet")
+	// Go writes a nil slice as null, so a fresh account's first wear must
+	// not turn into an ascended (locked) tablet.
+	fresh := &accounts.Account{Tablets: tablets, AwakeTabletIDs: nil}
+	if fresh.AwakeTablets()[453] {
+		t.Fatal("nil awake list must not ascend an equipped tablet")
 	}
 	asleep := &accounts.Account{Tablets: tablets, AwakeTabletIDs: []int{}}
 	if asleep.AwakeTablets()[453] {
-		t.Fatal("explicit empty awake list must remain asleep")
+		t.Fatal("explicit empty awake list must remain not ascended")
+	}
+	// Ascension is a tablet property: it does not depend on being equipped.
+	loft := &accounts.Account{Tablets: map[string]accounts.TabletRec{}, AwakeTabletIDs: []int{453}}
+	if !loft.AwakeTablets()[453] {
+		t.Fatal("unequipped ascended tablet must stay ascended")
 	}
 }
 

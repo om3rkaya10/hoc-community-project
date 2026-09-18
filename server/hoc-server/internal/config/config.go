@@ -118,15 +118,26 @@ const (
 	// Every account is granted the full tablet set (beta economy); deleted
 	// tablets can be bought back from the shop.
 	KitabeGrantAllTablets = true
+	// Loft capacity (GetUserInfo iv[0x88]) before any 0x5d expansion. The
+	// grant-all set is 50 tablets, so leave room for extra copies bought
+	// from the shop.
+	KitabeTabletCapacityDefault = 75
 	// Tablet reopen ("Uyut" 0x4e) prices. The client falls back to 750/20 when
 	// GetUserInfo iv[0x4f]/iv[0x50] are 0 (DlgTabletPage::onClicked
 	// @0x1229940); they are sent explicitly so both sides agree.
-	KitabeSleepEmblem     = 750
-	KitabeSleepRune       = 20
-	ServerTalent          = true
-	ServerTalentLoginSeed = false
-	ServerTalentSeatSeed  = false
-	TalentPointsDefault   = 40
+	KitabeSleepEmblem = 750
+	KitabeSleepRune   = 20
+	// Gold 1-for-1 inscription exchange (trade 0x59, EXCHANGE page third
+	// panel). GetUserInfo iv[0x6b]/iv[0x6c] → UserInfo+0x310/+0x314;
+	// DlgInscriptionPage::OnClickedConfirm1V1Exchange sends the price back
+	// with payType 5 (emblem) or 2 (rune). Original prices unknown; kept
+	// below the 750/20 tablet unlock.
+	KitabeExchangeGoldEmblem = 300
+	KitabeExchangeGoldRune   = 10
+	ServerTalent             = true
+	ServerTalentLoginSeed    = false
+	ServerTalentSeatSeed     = false
+	TalentPointsDefault      = 40
 )
 
 var (

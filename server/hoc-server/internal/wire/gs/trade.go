@@ -157,8 +157,10 @@ func buildUserInfo(a *accounts.Account, runeAdj int) []byte {
 	iv[3] = int64(emblem)
 	iv[0x28] = int64(talentPts)
 	iv[0x88] = int64(tabletPkt)
-	iv[0x4f] = int64(config.KitabeSleepEmblem) // getUserSleepTabletEmblem
-	iv[0x50] = int64(config.KitabeSleepRune)   // getUserSleepTabletRune
+	iv[0x4f] = int64(config.KitabeSleepEmblem)        // getUserSleepTabletEmblem
+	iv[0x50] = int64(config.KitabeSleepRune)          // getUserSleepTabletRune
+	iv[0x6b] = int64(config.KitabeExchangeGoldEmblem) // getUserExchangeGoldEmblems
+	iv[0x6c] = int64(config.KitabeExchangeGoldRune)   // getUserExchangeGoldRunes
 	iv[0x10b] = int64(selGroup)
 	iv[244] = int64(gems)
 	age, gender, saved := accounts.DefaultAge, accounts.DefaultGender, 1

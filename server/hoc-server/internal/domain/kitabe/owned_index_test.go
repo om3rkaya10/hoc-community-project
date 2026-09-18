@@ -3,31 +3,26 @@ package kitabe
 import (
 	"testing"
 
+	"hoc-server/internal/accounts"
 	"hoc-server/internal/wire/msgpack"
 )
 
-// The client links equipped cards to the backpack through TabletSlot[5] =
+// The client links equipped cards to the backpack through TabletSlot[4][0] =
 // index in the owned TabletInfo vector (DlgTabletPage::RefreshTabletButtonGroup
 // @0x122a5fc compares getIndexIDInPacket() with the backpack loop index).
 
-func testEquipped() map[[2]int]struct {
-	ID      int
-	Sockets map[int][2]int
-} {
-	return map[[2]int]struct {
-		ID      int
-		Sockets map[int][2]int
-	}{
-		{0, 0}: {ID: 464},
-		{0, 1}: {ID: 465},
-		{0, 2}: {ID: 467},
-		{1, 1}: {ID: 469},
+func testEquipped() map[[2]int]accounts.EquippedTablet {
+	// owned vector: [453, 464, 465, 467, 468, 469]
+	return map[[2]int]accounts.EquippedTablet{
+		{0, 0}: {UID: 2, ID: 464, Index: 1},
+		{0, 1}: {UID: 3, ID: 465, Index: 2},
+		{0, 2}: {UID: 4, ID: 467, Index: 3},
+		{1, 1}: {UID: 6, ID: 469, Index: 5},
 	}
 }
 
 func TestEquippedSlotsCarryOwnedIndexes(t *testing.T) {
-	owned := []int{453, 464, 465, 467, 468, 469}
-	v, err := msgpack.Decode(EquippedSlotsVector(testEquipped(), nil, false, OwnedIndexMap(owned)))
+	v, err := msgpack.Decode(EquippedSlotsVector(testEquipped()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +40,7 @@ func TestEquippedSlotsCarryOwnedIndexes(t *testing.T) {
 }
 
 func TestFullGroupsFilledSlotsCarryOwnedIndexes(t *testing.T) {
-	owned := []int{453, 464, 465, 467, 468, 469}
-	b := FullGroups(2, 3, true, testEquipped(), nil, false, map[int]bool{1: true, 2: true}, nil, OwnedIndexMap(owned))
+	b := FullGroups(2, 3, true, testEquipped(), map[int]bool{1: true, 2: true}, nil)
 	v, err := msgpack.Decode(b)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +60,8 @@ func TestFullGroupsFilledSlotsCarryOwnedIndexes(t *testing.T) {
 }
 
 func TestEquippedTabletMissingFromBackpackUsesMinusOne(t *testing.T) {
-	v, err := msgpack.Decode(EquippedSlotsVector(testEquipped(), nil, false, OwnedIndexMap([]int{453})))
+	eq := map[[2]int]accounts.EquippedTablet{{0, 0}: {UID: 9, ID: 464, Index: -1}}
+	v, err := msgpack.Decode(EquippedSlotsVector(eq))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,9 +72,15 @@ func TestEquippedTabletMissingFromBackpackUsesMinusOne(t *testing.T) {
 	}
 }
 
-func TestOwnedTabletsVectorKeepsOrder(t *testing.T) {
-	owned := []int{873, 453, 600}
-	v, err := msgpack.Decode(OwnedTabletsVector(owned, nil, map[int]bool{453: true}))
+// Two copies of one tablet are two entries with their own sockets and
+// ascension; the equipped card points at the exact copy by index.
+func TestOwnedTabletsVectorKeepsOrderAndCopies(t *testing.T) {
+	owned := []accounts.TabletView{
+		{UID: 1, ID: 873, Index: 0},
+		{UID: 2, ID: 453, Index: 1, Awake: true, Sockets: map[int][2]int{0: {494, 1}}},
+		{UID: 3, ID: 453, Index: 2},
+	}
+	v, err := msgpack.Decode(OwnedTabletsVector(owned))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,17 +88,26 @@ func TestOwnedTabletsVectorKeepsOrder(t *testing.T) {
 	if len(list) != 3 {
 		t.Fatalf("len=%d", len(list))
 	}
-	for i, id := range owned {
+	for i, want := range owned {
 		info := list[i].([]any)
-		if info[0] != int64(id) {
-			t.Fatalf("index %d id=%v want %d", i, info[0], id)
+		if info[0] != int64(want.ID) {
+			t.Fatalf("index %d id=%v want %d", i, info[0], want.ID)
 		}
 		wantWake := int64(0)
-		if id == 453 {
+		if want.Awake {
 			wantWake = 2
 		}
 		if info[8] != wantWake {
-			t.Fatalf("id %d wake=%v want %d", id, info[8], wantWake)
+			t.Fatalf("index %d wake=%v want %d", i, info[8], wantWake)
 		}
+		filled := info[1].(map[any]any)[int64(0)].([]any)[0].(bool)
+		if filled != (len(want.Sockets) > 0) {
+			t.Fatalf("index %d socket 0 filled=%v", i, filled)
+		}
+	}
+	eq := map[[2]int]accounts.EquippedTablet{{0, 0}: {UID: 3, ID: 453, Index: 2}}
+	s, _ := msgpack.Decode(EquippedSlotsVector(eq))
+	if got := s.([]any)[0].([]any)[4].([]any)[0]; got != int64(2) {
+		t.Fatalf("equipped second copy index=%v, want 2", got)
 	}
 }

@@ -27,10 +27,9 @@ func AwakeWire(a *accounts.Account) []int32 {
 		return nil
 	}
 	equipped := a.EquippedTablets()
-	awake := a.AwakeTablets()
 	keys := make([][2]int, 0, len(equipped))
 	for k, e := range equipped {
-		if e.ID > 0 && awake[e.ID] {
+		if e.ID > 0 && e.Awake {
 			keys = append(keys, k)
 		}
 	}

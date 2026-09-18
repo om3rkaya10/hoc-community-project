@@ -40,19 +40,28 @@ func inscriptionSlot(filled bool, itemID, qty int) []byte {
 	return out
 }
 
+// SocketCount is the number of inscription sockets every tablet card draws
+// (TabletButton::SetTabletInfo loops 0..3, TabletInfo::fillSlot inserts the
+// same four keys client-side).
+const SocketCount = 4
+
 func TabletInfo(itemID int, sockets map[int][2]int, awake bool) []byte {
-	if sockets == nil {
-		sockets = map[int][2]int{}
-	}
-	keys := sortedKeys(sockets)
 	var out []byte
 	out = append(out, msgpack.FixArray(16)...)
 	out = append(out, msgpack.Int(int64(itemID))...)
-	out = append(out, msgpack.FixMap(len(keys))...)
-	for _, idx := range keys {
-		pair := sockets[idx]
+	// [1] map<int,InscriptionSlot> always carries all four sockets. The
+	// card only hides a socket's energy-type marker when it finds the key
+	// with filled=false; a missing key leaves the marker in its initial
+	// state (visible, movie clip still playing), which is the Order/Chaos
+	// flicker seen on empty tablets in the loft.
+	out = append(out, msgpack.FixMap(SocketCount)...)
+	for idx := 0; idx < SocketCount; idx++ {
 		out = append(out, msgpack.Int(int64(idx))...)
-		out = append(out, inscriptionSlot(true, pair[0], pair[1])...)
+		if pair, ok := sockets[idx]; ok && pair[0] > 0 {
+			out = append(out, inscriptionSlot(true, pair[0], pair[1])...)
+		} else {
+			out = append(out, inscriptionSlot(false, 0, 0)...)
+		}
 	}
 	out = append(out, msgpack.Int(0)...)
 	out = append(out, msgpack.Int(0)...)
@@ -70,21 +79,6 @@ func TabletInfo(itemID int, sockets map[int][2]int, awake bool) []byte {
 	}
 	out = append(out, msgpack.EmptyArray()...)
 	return out
-}
-
-func sortedKeys(m map[int][2]int) []int {
-	keys := make([]int, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-	return keys
 }
 
 func InscriptionMap(pairs [][4]int) []byte {
@@ -118,47 +112,39 @@ func InscriptionMap(pairs [][4]int) []byte {
 }
 
 // OwnedTabletsVector is the backpack (UserInfo+0xB4C vector<TabletInfo>).
-// Its order is the client's tablet index space: TabletSlot[5]
-// (indexIDInPacket) and the sleep/delete/wake requests all refer to a
-// position in this vector, so callers must pass the account's OwnedTabletIDs
-// unchanged.
-func OwnedTabletsVector(ids []int, sockets map[int]map[int][2]int, awake map[int]bool) []byte {
+// Its order is the client's tablet index space: TabletSlot[4][0]
+// (indexIDInPacket) and the sleep/delete/fill requests all refer to a
+// position in this vector, so it is emitted exactly in account order.
+func OwnedTabletsVector(owned []accounts.TabletView) []byte {
 	var out []byte
-	out = append(out, msgpack.FixArray(len(ids))...)
-	for _, tid := range ids {
-		socks := sockets[tid]
-		out = append(out, TabletInfo(tid, socks, awake[tid])...)
+	out = append(out, msgpack.FixArray(len(owned))...)
+	for _, v := range owned {
+		out = append(out, TabletInfo(v.ID, v.Sockets, v.Awake)...)
 	}
 	return out
 }
 
-// OwnedIndexMap maps tablet id → position in the owned vector.
-func OwnedIndexMap(ids []int) map[int]int {
-	out := make(map[int]int, len(ids))
-	for i, id := range ids {
-		if _, dup := out[id]; !dup {
-			out[id] = i
-		}
+// EquippedSlotsVector is UserInfo+0xB40. TabletSlot[4][0] carries the owned
+// index of each equipped copy (DlgTabletPage::RefreshTabletButtonGroup hides
+// that backpack entry and stores the index on the card; the unlock, delete
+// and fill requests send it back).
+func EquippedSlotsVector(equipped map[[2]int]accounts.EquippedTablet) []byte {
+	keys := sortedSlotKeys(equipped)
+	var out []byte
+	out = append(out, msgpack.FixArray(len(keys))...)
+	for _, k := range keys {
+		eq := equipped[k]
+		out = append(out, tabletSlotWithPacketIndex(SlotFilled, 0, 0, eq.ID, eq.Sockets, eq.Awake, packetIndexOf(eq))...)
 	}
 	return out
 }
 
-// EquippedSlotsVector is UserInfo+0xB40. TabletSlot[5] carries the owned
-// index of each equipped tablet (DlgTabletPage::RefreshTabletButtonGroup
-// hides that backpack entry and stores the index on the card; the unlock,
-// delete and wake requests send it back).
-func EquippedSlotsVector(equipped map[[2]int]struct {
-	ID      int
-	Sockets map[int][2]int
-}, awake map[int]bool, autoWakeAll bool, ownedIndex map[int]int) []byte {
-	type slot struct {
-		id   int
-		sock map[int][2]int
-	}
-	var slots []slot
+func sortedSlotKeys(equipped map[[2]int]accounts.EquippedTablet) [][2]int {
 	keys := make([][2]int, 0, len(equipped))
-	for k := range equipped {
-		keys = append(keys, k)
+	for k, eq := range equipped {
+		if eq.ID != 0 {
+			keys = append(keys, k)
+		}
 	}
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {
@@ -167,29 +153,16 @@ func EquippedSlotsVector(equipped map[[2]int]struct {
 			}
 		}
 	}
-	for _, k := range keys {
-		eq := equipped[k]
-		if eq.ID == 0 {
-			continue
-		}
-		slots = append(slots, slot{id: eq.ID, sock: eq.Sockets})
-	}
-	var out []byte
-	out = append(out, msgpack.FixArray(len(slots))...)
-	for _, s := range slots {
-		isAwake := autoWakeAll || awake[s.id]
-		out = append(out, tabletSlotWithPacketIndex(SlotFilled, 0, 0, s.id, s.sock, isAwake, ownedIndexOf(ownedIndex, s.id))...)
-	}
-	return out
+	return keys
 }
 
-// ownedIndexOf falls back to -1 (the client's "no backpack entry" default)
-// for a tablet that is equipped but missing from the owned vector.
-func ownedIndexOf(ownedIndex map[int]int, tabletID int) int {
-	if idx, ok := ownedIndex[tabletID]; ok {
-		return idx
+// packetIndexOf falls back to -1 (the client's "no backpack entry" default)
+// for a slot whose instance is missing from the owned vector.
+func packetIndexOf(eq accounts.EquippedTablet) int {
+	if eq.Index < 0 {
+		return -1
 	}
-	return -1
+	return eq.Index
 }
 
 func tabletSlot(state, emblemCost, runeCost, itemID int, socks map[int][2]int, awake bool) []byte {
@@ -238,10 +211,7 @@ func slotGroup(unlocked bool, slots [][]byte, pageRune, pageEmblem int) []byte {
 }
 
 // FullGroups map keys 1..numPages — all_open empty slots use state=1.
-func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]struct {
-	ID      int
-	Sockets map[int][2]int
-}, awake map[int]bool, autoWakeAll bool, unlocked map[int]bool, states map[string]int, ownedIndex map[int]int) []byte {
+func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]accounts.EquippedTablet, unlocked map[int]bool, states map[string]int) []byte {
 	if len(unlocked) == 0 {
 		unlocked = map[int]bool{}
 		for page := 1; page <= numPages; page++ {
@@ -259,9 +229,8 @@ func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]st
 			if !pageOpen {
 				slots = append(slots, tabletSlot(SlotLocked, 100*(si+1), 500*(si+1), 0, nil, false))
 			} else if ok && eq.ID != 0 {
-				aw := autoWakeAll || awake[eq.ID]
 				slots = append(slots, tabletSlotWithPacketIndex(
-					SlotFilled, 0, 0, eq.ID, eq.Sockets, aw, ownedIndexOf(ownedIndex, eq.ID),
+					SlotFilled, 0, 0, eq.ID, eq.Sockets, eq.Awake, packetIndexOf(eq),
 				))
 			} else if state, exists := states[fmt.Sprintf("%d:%d", page0, si)]; exists {
 				emblemCost, runeCost := 0, 0
@@ -285,26 +254,13 @@ func FullGroups(numPages, slotsPerPage int, allOpen bool, equipped map[[2]int]st
 	return out
 }
 
-func awakeSet(a *accounts.Account) map[int]bool {
-	if a == nil {
-		return map[int]bool{}
-	}
-	return a.AwakeTablets()
-}
-
 // GESubMember10 — BuyItem[17]: +0xB58 / +0xB40 / +0xB4C.
 func GESubMember10(a *accounts.Account) []byte {
-	pairs := a.InscriptionPairs()
-	equipped := a.EquippedTablets()
-	socks := a.TabletSockets()
-	aw := awakeSet(a)
-	owned := a.OwnedTabletIDs()
-	idx := OwnedIndexMap(owned)
 	var out []byte
 	out = append(out, msgpack.FixArray(3)...)
-	out = append(out, InscriptionMap(pairs)...)
-	out = append(out, EquippedSlotsVector(equipped, aw, false, idx)...)
-	out = append(out, OwnedTabletsVector(owned, socks, aw)...)
+	out = append(out, InscriptionMap(a.InscriptionPairs())...)
+	out = append(out, EquippedSlotsVector(a.EquippedTablets())...)
+	out = append(out, OwnedTabletsVector(a.OwnedTabletViews())...)
 	return out
 }
 
@@ -320,16 +276,25 @@ func UnlockResponseWithCallback(a *accounts.Account, callbackA, callbackB int) [
 }
 
 func UnlockResponseWithResultCallback(a *accounts.Account, result, callbackA, callbackB int) []byte {
+	return UnlockResponseFull(a, result, 0, 0, callbackA, callbackB)
+}
+
+// UnlockResponseFull additionally sets the two per-operation ints:
+//   - [6] resultItem: DispatchTradeMsg passes it as the third argument of
+//     onMergeInscriptionResponse / onMergeGoldInscriptionResponse, which
+//     run Item::GetPrototype/GetDisplayInfo on it to show the inscription
+//     the exchange produced (0 → nothing is shown).
+//   - [7] ascended: third argument of onFillInscriptionSlotResponse;
+//     non-zero keeps the page open and plays the ascension animation, zero
+//     returns to the tablet page.
+func UnlockResponseFull(a *accounts.Account, result, resultItem, ascended, callbackA, callbackB int) []byte {
 	emblem, runeV := 99999, 9999
 	if a != nil {
 		emblem, runeV = a.Emblem, a.Rune
 	}
 	pairs := a.InscriptionPairs()
 	equipped := a.EquippedTablets()
-	socks := a.TabletSockets()
-	aw := awakeSet(a)
-	owned := a.OwnedTabletIDs()
-	idx := OwnedIndexMap(owned)
+	owned := a.OwnedTabletViews()
 	unlocked := map[int]bool{}
 	states := map[string]int{}
 	if a != nil {
@@ -342,11 +307,11 @@ func UnlockResponseWithResultCallback(a *accounts.Account, result, callbackA, ca
 	out = append(out, msgpack.Int(int64(emblem))...)
 	out = append(out, msgpack.Int(int64(runeV))...)
 	out = append(out, InscriptionMap(pairs)...)
-	out = append(out, EquippedSlotsVector(equipped, aw, false, idx)...)
-	out = append(out, OwnedTabletsVector(owned, socks, aw)...)
-	out = append(out, msgpack.Int(0)...)
-	out = append(out, msgpack.Int(0)...)
-	out = append(out, FullGroups(7, 3, true, equipped, aw, false, unlocked, states, idx)...)
+	out = append(out, EquippedSlotsVector(equipped)...)
+	out = append(out, OwnedTabletsVector(owned)...)
+	out = append(out, msgpack.Int(int64(resultItem))...)
+	out = append(out, msgpack.Int(int64(ascended))...)
+	out = append(out, FullGroups(7, 3, true, equipped, unlocked, states)...)
 	out = append(out, msgpack.Int(int64(callbackA))...)
 	out = append(out, msgpack.Int(int64(callbackB))...)
 	return out

@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, `server-v0.1.7`, and `server-v0.1.8`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, `server-v0.1.7`, `server-v0.1.8`, and `server-v0.1.9`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.9
+
+`server-v0.1.9` is a Kitabe (tablet) release on top of `server-v0.1.8`. Ascension follows the client's rule (both energy bars full → EDIT TABLET → SAVE → "Do you want to ascend this tablet?"), so tablets are no longer locked the moment they are equipped and a paid unlock is not undone by re-equipping; empty tablets in the loft stop flickering their socket markers; the inscription exchange takes any four inscriptions of one tier and shows the random result card, and the gold 1↔1 swap works; and tablets are individual copies, so a tablet you already own can be bought again and each copy keeps its own inscriptions, ascension and slot. Accounts migrate to the copy-based inventory (v2) on the first load; the previous fields remain as a mirror so a `server-v0.1.8` binary can still read the store. Deploying it includes a one-shot `clear-ascension` pass over the account store (run with the server stopped) because every tablet the old server saw equipped is flagged ascended — players are told to re-ascend the tablets they completed. It is backed by the deterministic Go suite and a recorded validation against a local build with a Nox client in `VALIDATION.md`. No client update is required for the server changes; it pairs with Global Public Beta 0.3.3, the client build that fixes the tablet-page crash (see `CHANGELOG.md` and `COMPATIBILITY.md`).
 
 ### server-v0.1.8
 
