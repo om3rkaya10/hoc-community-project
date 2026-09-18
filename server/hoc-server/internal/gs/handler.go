@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,10 @@ type connState struct {
 	skillBodies   [][]byte // cache for post-AllAck SkillAck replay
 	resumeSyn     int
 	resumePending bool
+	// detached: the session already handled this transport (takeover by a
+	// newer ReLoginReq, or a refused resume) — the disconnect path must not
+	// run for it, or it would clear/refresh the hold it no longer owns.
+	detached bool
 }
 
 var (
@@ -118,9 +123,18 @@ func Handle(conn net.Conn) {
 	addr := conn.RemoteAddr().String()
 	fmt.Printf("\n###### [GS] connection %s ######\n", addr)
 
+	netx.ApplyGSDeadPeerDetection(conn)
+
 	st := &connState{conn: conn, roomID: config.DefaultRoomID, tskcid: config.DefaultTskCID}
 	setState(conn, st)
 	defer func() {
+		st.mu.Lock()
+		detached := st.detached
+		st.mu.Unlock()
+		if detached {
+			delState(conn)
+			return
+		}
 		if st.sess != nil {
 			if fails := st.sess.NoteSoftResumeEOF(); fails > 0 {
 				fmt.Printf(" [MATCH] soft-resume EOF fail #%d user=%q\n", fails, st.sess.Username)
@@ -209,7 +223,26 @@ func handleReLogin(conn net.Conn, st *connState, seq uint16, body []byte) bool {
 		fmt.Printf(" [GS] ReLoginReq rejected: malformed body=%dB hex=%x\n", len(body), body)
 		return false
 	}
-	sess, claim, why := session.ClaimMatchHold(req.RoomName, req.GUID, conn, time.Now())
+	now := time.Now()
+	sess, claim, why := session.ClaimMatchHold(req.RoomName, req.GUID, conn, now)
+	if sess == nil && strings.HasPrefix(why, "no-hold") {
+		// The owner is still "attached" through a socket that never EOF'd
+		// (silent drop, no RST). The new ReLoginReq is the proof it is dead:
+		// hold the seat now and close the stale transports out of band.
+		if owner, stale, ok := session.TakeoverMatchSession(req.RoomName, req.GUID, now, config.MatchReconnectHoldTTL); ok {
+			for _, c := range stale {
+				if st2 := getState(c); st2 != nil {
+					st2.mu.Lock()
+					st2.detached = true
+					st2.mu.Unlock()
+				}
+				_ = c.Close()
+			}
+			fmt.Printf(" [MATCH] reconnect takeover user=%q room=%s stale=%d ttl=%s\n",
+				owner.Username, req.RoomName, len(stale), config.MatchReconnectHoldTTL)
+			sess, claim, why = session.ClaimMatchHold(req.RoomName, req.GUID, conn, now)
+		}
+	}
 	if sess == nil {
 		fmt.Printf(" [GS] ReLoginReq rejected room=%q guid=%q reason=%s\n", req.RoomName, req.GUID, why)
 		return false
@@ -217,15 +250,18 @@ func handleReLogin(conn net.Conn, st *connState, seq uint16, body []byte) bool {
 
 	ackSeq := int32(seq) + 1
 	// LIVE: soft success Ack still yields Dev|3005 even when syn-aligned. After
-	// N quick EOF cycles, answer success=0 so the client stops Relogin spam.
-	failMax := config.MatchReloginFailMax
-	if failMax > 0 && sess.SoftResumeFailCount() >= failMax {
+	// N quick EOF cycles, refuse (no Ack) so the client stops Relogin spam —
+	// but keep the seat: the hold TTL decides, and once the client slows down
+	// past the cooldown it gets a real Ack again.
+	if sess.SoftResumeRefuse(now, config.MatchReloginFailMax, config.MatchReloginFailCooldown) {
 		// success=0 does not stop mid-match soft path (Game+0x160≠1 still
 		// calls OnSoftReconnectSucceed). Refuse without a soft-shaped Ack.
-		fmt.Printf(" [GS] ReLoginReq refuse after %d soft-fail EOFs user=%q (no Ack)\n",
-			sess.SoftResumeFailCount(), sess.Username)
-		sess.MarkGSLeave()
-		session.LeaveRoom(sess, "relogin_fail_max")
+		fmt.Printf(" [GS] ReLoginReq refuse after %d soft-fail EOFs user=%q (no Ack, hold kept, cooldown=%s)\n",
+			sess.SoftResumeFailCount(), sess.Username, config.MatchReloginFailCooldown)
+		sess.AbandonMatchResume(conn)
+		st.mu.Lock()
+		st.detached = true
+		st.mu.Unlock()
 		return false
 	}
 
@@ -267,6 +303,12 @@ func handleReLogin(conn net.Conn, st *connState, seq uint16, body []byte) bool {
 	oldSyn := claim.Room.MatchSynNext
 	oldFrame := claim.Room.MatchSFrame
 	forced := false
+	// Never rewind when the replay ring can deliver the missed range: a
+	// rewind plus a replay hands the client the old packets AND a second,
+	// lower live sequence right behind them (Nox 2026-09-19, solo: replay
+	// 489..1102 then live 490 → EOF → loop until the fail guard). The
+	// rewind stays only as the fallback for a gap older than the ring.
+	_, oldest, replayable := claim.Room.MatchReplayFromLocked(int(req.RequestedSyn))
 	if req.RequestedSyn > 0 {
 		need := int(req.RequestedSyn) + 1
 		if claim.Room.MatchSynNext < need {
@@ -274,7 +316,9 @@ func handleReLogin(conn net.Conn, st *connState, seq uint16, body []byte) bool {
 			if req.GSFrame > 0 && claim.Room.MatchSFrame < int(req.GSFrame) {
 				claim.Room.MatchSFrame = int(req.GSFrame)
 			}
-		} else if claim.Room.MatchSynNext > need && peersFrozen {
+		} else if claim.Room.MatchSynNext > need && peersFrozen && !replayable {
+			fmt.Printf(" [MATCH] resume rewind fallback user=%q reqsyn=%d ring-oldest=%d\n",
+				sess.Username, req.RequestedSyn, oldest)
 			forced = true
 			claim.Room.MatchSynNext = need
 			if req.GSFrame > 0 {
@@ -513,8 +557,23 @@ func handlePkt(conn net.Conn, st *connState, seq uint16, payload []byte) {
 		if len(skill) < 4 {
 			skill = wiregs.CIDOnly(st.tskcid)
 		}
+		if r1, r2, rok := wiregs.ParseSummonerSpells(skill); st.sess != nil {
+			fmt.Printf(" [GS] SkillAck raw spells=%d/%d valid=%v session=%d/%d\n",
+				r1, r2, rok, st.sess.SeatSpell1, st.sess.SeatSpell2)
+		}
 		if s1, s2, ok := wiregs.ParseSummonerSpells(skill); ok && st.sess != nil {
 			st.sess.SeatSpell1, st.sess.SeatSpell2 = s1, s2
+			st.sess.Account.SetSummonerSpells(s1, s2)
+		} else if st.sess != nil && st.sess.SeatSpell1 == 0 && st.sess.SeatSpell2 == 0 {
+			// A fresh client reports 0/0 until the player opens the spell
+			// picker; the original service seeded the PlayerInfo from the
+			// profile. Fall back to the account's last pair (then the
+			// default) so LoadMap never carries 0/0 and the match does not
+			// roll random spells (LIVE 2026-09-18, 8 matches in ten days).
+			s1, s2 := rememberedSummonerSpells(st.sess.Account)
+			st.sess.SeatSpell1, st.sess.SeatSpell2 = s1, s2
+			fmt.Printf(" [GS] summoner spells absent in SkillAck user=%q → remembered %d/%d\n",
+				st.sess.Username, s1, s2)
 		}
 		if rdy, ok := wiregs.ParseReadyFromSkill(skill); ok && st.sess != nil {
 			accepted := st.sess.ApplyReadyFromSkill(rdy == 1)
@@ -737,6 +796,18 @@ func handleReady(conn net.Conn, st *connState) {
 	if extra != nil {
 		fmt.Printf(" [GS] LoadMap PI extra awake=%v talentPage=%d talents=%d banner=%d/%d x%d\n",
 			extra.AwakeWire, extra.TalentPage, len(extra.Talents), extra.Pole, extra.Pattern, extra.PatternUses)
+	}
+	if room != nil {
+		// A solo room is a match too: ClaimMatchHold requires State=="match",
+		// so without this a solo player could never reconnect (Nox
+		// 2026-09-19: hold created, rejected with state="open").
+		room.Lock()
+		room.State = "match"
+		room.MatchClockArmed = false
+		room.MatchSFrame = 0
+		room.MatchSynNext = 0
+		room.MatchFramesSent = 0
+		room.Unlock()
 	}
 	sendSyn(conn, st, 0x2002, lm)
 	fmt.Printf(" [GS SENT] LoadMap 0x2002 seat=1 hero=%d map=%q mode=%d opts=%d/%d/%d/%d\n",
@@ -1121,4 +1192,13 @@ func sendRoomSyn(conn net.Conn, st *connState, sub uint16, body []byte, senderSi
 	}
 	st.seq++
 	return seq, nil
+}
+
+// rememberedSummonerSpells is the account's last reported pair, or the
+// configured default for an account that never reported one.
+func rememberedSummonerSpells(acc *accounts.Account) (int, int) {
+	if s1, s2, ok := acc.SummonerSpellPair(); ok {
+		return s1, s2
+	}
+	return config.DefaultSummonerSpell1, config.DefaultSummonerSpell2
 }

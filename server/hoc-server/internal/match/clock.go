@@ -225,7 +225,7 @@ func (c *Clock) DisarmIfIdle(room *session.Room) bool {
 	room.Lock()
 	alive := false
 	for _, member := range room.Members {
-		if member != nil && member.IsMatchPlaying() {
+		if member != nil && (member.IsMatchPlaying() || member.IsMatchHeld()) {
 			alive = true
 			break
 		}
@@ -373,9 +373,14 @@ func (c *Clock) sendFrames(room *session.Room, n int, tag string) {
 		if !room.MatchClockArmed {
 			return
 		}
-		// No playing members → disarm (stop ghost clock after EOF).
+		// No playing members → disarm (stop ghost clock after EOF). A member
+		// in reconnect hold keeps the clock alive: ClaimMatchHold requires an
+		// armed clock, and the frames keep filling the replay ring the
+		// rejoiner is caught up from. Without this a solo player could never
+		// rejoin (LIVE 2026-09-18 20:51: hold created, clock disarmed on the
+		// next tick, every ReLoginReq answered "no-hold").
 		for _, m := range room.Members {
-			if m != nil && m.IsMatchPlaying() {
+			if m != nil && (m.IsMatchPlaying() || m.IsMatchHeld()) {
 				alive++
 			}
 		}

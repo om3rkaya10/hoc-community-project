@@ -2,7 +2,10 @@ package accounts
 
 import "testing"
 
-func TestEquipTabletMovesSameCopyInsteadOfDuplicating(t *testing.T) {
+// Pages are alternative loadouts: the same copy may sit on several pages
+// (player video 2026-09-18: equipping on page 2 emptied the slot on page 3),
+// but within one page it moves instead of duplicating.
+func TestEquipTabletSameCopyOnAnotherPageKeepsBoth(t *testing.T) {
 	a := &Account{Tablets: map[string]TabletRec{
 		"0:1": {ID: 465},
 	}}
@@ -11,11 +14,22 @@ func TestEquipTabletMovesSameCopyInsteadOfDuplicating(t *testing.T) {
 		t.Fatalf("legacy slot not bound to an instance: %#v", a.Tablets)
 	}
 	a.EquipTablet(1, 2, uid)
-	if _, ok := a.Tablets["0:1"]; ok {
-		t.Fatalf("old slot retained the copy: %#v", a.Tablets)
+	if got := a.Tablets["0:1"]; got.UID != uid {
+		t.Fatalf("equipping on page 1 evicted the copy from page 0: %#v", a.Tablets)
 	}
 	if got := a.Tablets["1:2"]; got.ID != 465 || got.UID != uid {
 		t.Fatalf("new slot=%#v, want uid %d / 465", got, uid)
+	}
+	// Same page: the copy moves.
+	a.EquipTablet(1, 0, uid)
+	if _, ok := a.Tablets["1:2"]; ok {
+		t.Fatalf("same-page equip duplicated the copy: %#v", a.Tablets)
+	}
+	if got := a.Tablets["1:0"]; got.UID != uid {
+		t.Fatalf("same-page move lost the copy: %#v", a.Tablets)
+	}
+	if n := a.OwnedTabletCount(465); n != 1 {
+		t.Fatalf("equip minted copies of 465: %d", n)
 	}
 }
 
@@ -61,22 +75,30 @@ func TestTwoCopiesOfOneTabletAreIndependent(t *testing.T) {
 }
 
 func TestNormalizeDuplicateTabletsKeepsLowestSlot(t *testing.T) {
+	// Same id twice on page 0 (pre-v0.1.3 duplicate): keep the lowest slot.
+	// The same id on page 1 is a second loadout and binds to the SAME copy.
 	a := &Account{OwnedTablets: []int{465, 467}, Tablets: map[string]TabletRec{
-		"1:2": {ID: 465},
+		"0:0": {ID: 465},
 		"0:1": {ID: 465},
 		"0:2": {ID: 467},
+		"1:2": {ID: 465},
 	}}
-	if !a.normalizeDuplicateTabletsLocked() {
-		t.Fatal("duplicate normalization reported no change")
+	a.EquippedTablets() // migrate
+	if _, ok := a.Tablets["0:1"]; ok {
+		t.Fatalf("same-page duplicate survived: %#v", a.Tablets)
 	}
-	if _, ok := a.Tablets["1:2"]; ok {
-		t.Fatalf("higher duplicate slot survived: %#v", a.Tablets)
-	}
-	if a.Tablets["0:1"].ID != 465 || a.Tablets["0:2"].ID != 467 {
+	if a.Tablets["0:0"].ID != 465 || a.Tablets["0:2"].ID != 467 {
 		t.Fatalf("normalization damaged canonical slots: %#v", a.Tablets)
+	}
+	if a.Tablets["1:2"].ID != 465 || a.Tablets["1:2"].UID != a.Tablets["0:0"].UID {
+		t.Fatalf("other-page loadout lost or bound to a different copy: %#v", a.Tablets)
 	}
 	if len(a.TabletInstances) != 2 {
 		t.Fatalf("legacy same-id slots must not mint copies: %#v", a.TabletInstances)
+	}
+	// Normalize is idempotent on the migrated state.
+	if a.normalizeDuplicateTabletsLocked() {
+		t.Fatalf("normalize changed a clean per-page layout: %#v", a.Tablets)
 	}
 }
 

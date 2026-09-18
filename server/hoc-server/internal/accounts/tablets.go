@@ -133,17 +133,31 @@ func ensureTabletInstancesLocked(a *Account) bool {
 		pj, sj, _ := parseSlotKey(keys[j])
 		return pi < pj || (pi == pj && si < sj)
 	})
-	taken := map[int]bool{}
+	// taken[page][uid]: a copy is unique within a page; the same copy on
+	// another page is a legitimate second loadout, and the legacy record's
+	// second page binds to the SAME instance (prefer the copy already bound
+	// to that id on another page, then any unbound copy).
+	taken := map[int]map[int]bool{}
+	boundByID := map[int]int{}
 	for _, key := range keys {
 		rec := a.Tablets[key]
+		page, _, _ := parseSlotKey(key)
 		if rec.ID <= 0 {
 			delete(a.Tablets, key)
 			continue
 		}
+		if taken[page] == nil {
+			taken[page] = map[int]bool{}
+		}
 		bound := -1
 		if rec.UID > 0 {
-			if i := a.tabletIndexByUIDLocked(rec.UID); i >= 0 && !taken[rec.UID] && a.TabletInstances[i].ID == rec.ID {
+			if i := a.tabletIndexByUIDLocked(rec.UID); i >= 0 && !taken[page][rec.UID] && a.TabletInstances[i].ID == rec.ID {
 				bound = i
+			}
+		}
+		if bound < 0 {
+			if uid, ok := boundByID[rec.ID]; ok && !taken[page][uid] {
+				bound = a.tabletIndexByUIDLocked(uid)
 			}
 		}
 		if bound < 0 {
@@ -153,14 +167,14 @@ func ensureTabletInstancesLocked(a *Account) bool {
 					continue
 				}
 				ownedCopy = true
-				if !taken[inst.UID] {
+				if !taken[page][inst.UID] {
 					bound = i
 					break
 				}
 			}
 			if bound < 0 && ownedCopy {
-				// Legacy record with the same id in two slots (pre-v0.1.3
-				// EquipTablet duplicated): keep the lowest slot only.
+				// Same id twice on ONE page (pre-v0.1.3 EquipTablet
+				// duplicated): keep the lowest slot only.
 				delete(a.Tablets, key)
 				continue
 			}
@@ -175,7 +189,8 @@ func ensureTabletInstancesLocked(a *Account) bool {
 		if len(rec.Sockets) > 0 {
 			inst.Sockets = copySockets(rec.Sockets)
 		}
-		taken[inst.UID] = true
+		taken[page][inst.UID] = true
+		boundByID[inst.ID] = inst.UID
 		a.Tablets[key] = TabletRec{UID: inst.UID, ID: inst.ID, Sockets: copySockets(inst.Sockets)}
 	}
 	syncTabletMirrorLocked(a)
@@ -261,7 +276,7 @@ func (a *Account) normalizeDuplicateTabletsLocked() bool {
 		pj, sj, _ := parseSlotKey(keys[j])
 		return pi < pj || (pi == pj && si < sj)
 	})
-	seen := map[int]bool{}
+	seen := map[[2]int]bool{} // {page, uid}: unique within a page only
 	for _, key := range keys {
 		rec := a.Tablets[key]
 		if rec.UID <= 0 || a.tabletIndexByUIDLocked(rec.UID) < 0 {
@@ -269,12 +284,13 @@ func (a *Account) normalizeDuplicateTabletsLocked() bool {
 			changed = true
 			continue
 		}
-		if seen[rec.UID] {
+		page, _, _ := parseSlotKey(key)
+		if seen[[2]int{page, rec.UID}] {
 			delete(a.Tablets, key)
 			changed = true
 			continue
 		}
-		seen[rec.UID] = true
+		seen[[2]int{page, rec.UID}] = true
 	}
 	return changed
 }
@@ -486,8 +502,16 @@ func (a *Account) EquipTablet(page, slot, uid int) {
 			a.Tablets = map[string]TabletRec{}
 		}
 		targetKey := fmt.Sprintf("%d:%d", page, slot)
+		// Pages are alternative loadouts (one is active in a match), so the
+		// same copy may sit on several pages; it is unique only within a
+		// page. v0.1.3–v0.1.9 evicted it from every other slot, so equipping
+		// a tablet on page 2 silently emptied its slot on page 3 (player
+		// video, 2026-09-18).
 		for key, rec := range a.Tablets {
-			if key != targetKey && rec.UID == uid {
+			if key == targetKey || rec.UID != uid {
+				continue
+			}
+			if p, _, ok := parseSlotKey(key); ok && p == page {
 				delete(a.Tablets, key)
 			}
 		}

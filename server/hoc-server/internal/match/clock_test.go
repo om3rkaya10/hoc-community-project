@@ -322,3 +322,58 @@ func TestFrameTickerStopsOnDisarm(t *testing.T) {
 		t.Fatalf("ghost clock kept running after Disarm: %d -> %d", frozen, later)
 	}
 }
+
+// LIVE 2026-09-18 20:51 (and reproduced on Nox 2026-09-19): a solo player's
+// disconnect put the session into reconnect hold, the next tick saw no
+// playing member and disarmed the clock, and ClaimMatchHold (which requires
+// an armed clock) answered every ReLoginReq with "no-hold". A held member
+// must keep the clock alive so the hold stays claimable and the replay ring
+// keeps filling; only the hold's expiry (LeaveRoom) may let it go idle.
+func TestHeldSoloPlayerKeepsClockArmed(t *testing.T) {
+	useLegacyPump(t)
+	solo := &session.Session{Username: "solo", Account: &accounts.Account{Username: "solo"}}
+	room := &session.Room{Host: solo, Members: []*session.Session{solo}}
+	solo.SetMatchPlaying(true)
+	conn, peer := net.Pipe()
+	defer conn.Close()
+	defer peer.Close()
+	solo.AttachGS(conn)
+	solo.Room = room
+
+	sends := 0
+	clock := NewClock(func(net.Conn, uint16, uint16, []byte, bool) { sends++ })
+	clock.Arm(room)
+	clock.PumpOnTimeoutFor(room, solo)
+	if sends != 1 || room.MatchSFrame != 1 {
+		t.Fatalf("baseline frame not sent: sends=%d frame=%d", sends, room.MatchSFrame)
+	}
+
+	if held, _, _ := solo.DetachGSForDisconnect(conn, true, true, time.Minute); !held {
+		t.Fatal("solo disconnect did not enter hold")
+	}
+	if clock.DisarmIfIdle(room) || !room.MatchClockArmed {
+		t.Fatal("clock disarmed while the only member was in reconnect hold")
+	}
+	// Production runs the dedicated ticker, whose tick is sendFrames itself
+	// (the legacy pump only fires for a playing master).
+	clock.sendFrames(room, 1, "held-tick")
+	if !room.MatchClockArmed || room.MatchSFrame != 2 {
+		t.Fatalf("held-member tick: armed=%v frame=%d want armed frame=2", room.MatchClockArmed, room.MatchSFrame)
+	}
+	if sends != 1 {
+		t.Fatalf("frames were sent to a held (detached) member: sends=%d", sends)
+	}
+	room.Lock()
+	ring := len(room.MatchReplay)
+	room.Unlock()
+	if ring != 2 {
+		t.Fatalf("replay ring did not keep filling during hold: %d", ring)
+	}
+
+	// Hold gone (expired → left the room): now the clock may go idle.
+	solo.MatchHold = false
+	room.Members = nil
+	if !clock.DisarmIfIdle(room) {
+		t.Fatal("clock stayed armed with no members left")
+	}
+}

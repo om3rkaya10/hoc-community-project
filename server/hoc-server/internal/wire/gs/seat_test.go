@@ -108,3 +108,15 @@ func TestParseSummonerSpellsNoSpellsNotLatched(t *testing.T) {
 		t.Fatal("short body must not latch")
 	}
 }
+
+// Nox 2026-09-19: the client reports level-1 Heal (34) + level-1 Mana Regen
+// (593) before the player touches the picker; ids below 100 must parse.
+func TestParseSummonerSpellsAcceptsLowIDs(t *testing.T) {
+	s1, s2, ok := wiregs.ParseSummonerSpells(skillBody("gllive:x", "gllive:x", "Testab", 0, 34, 593))
+	if !ok || s1 != 34 || s2 != 593 {
+		t.Fatalf("34/593 parsed as %d/%d ok=%v", s1, s2, ok)
+	}
+	if _, _, ok := wiregs.ParseSummonerSpells(skillBody("gllive:x", "gllive:x", "Testab", 1, 0, 593)); ok {
+		t.Fatal("0/593 accepted as a valid pair")
+	}
+}

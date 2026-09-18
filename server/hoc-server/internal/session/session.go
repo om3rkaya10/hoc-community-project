@@ -61,6 +61,7 @@ type Session struct {
 	// SoftResumeFails counts Ack→quick-EOF cycles; used to stop Relogin flap.
 	SoftResumeFails int
 	softResumeAt    time.Time
+	softFailAt      time.Time
 
 	GSConns []net.Conn
 	Room    *Room
@@ -694,6 +695,7 @@ func ClaimMatchHold(roomName, guid string, conn net.Conn, now time.Time) (*Sessi
 	room.mu.Lock()
 	var expired *Session
 	var expiredGeneration uint64
+	detail := ""
 	for _, s := range room.Members {
 		if s == nil {
 			continue
@@ -710,6 +712,13 @@ func ClaimMatchHold(roomName, guid string, conn net.Conn, now time.Time) (*Sessi
 			valid = false
 		}
 		if !valid {
+			if s.GUID == guid {
+				// Name the failed condition; "no-hold" alone hid a disarmed
+				// clock for weeks (LIVE 2026-09-18).
+				detail = fmt.Sprintf(" (hold=%v sameRoom=%v holdRoom=%d/%d/%d seat=%d/%d hero=%d/%d state=%q armed=%v)",
+					s.MatchHold, s.Room == room, s.MatchHoldRoomID, s.RoomID, room.ID,
+					s.Seat, s.MatchHoldSeat, s.SeatHeroID, s.MatchHoldHero, room.State, room.MatchClockArmed)
+			}
 			s.mu.Unlock()
 			continue
 		}
@@ -738,7 +747,68 @@ func ClaimMatchHold(roomName, guid string, conn net.Conn, now time.Time) (*Sessi
 		expireMatchHold(expired, expiredGeneration)
 		return nil, MatchHoldClaim{}, "expired"
 	}
-	return nil, MatchHoldClaim{}, "no-hold"
+	return nil, MatchHoldClaim{}, "no-hold" + detail
+}
+
+// TakeoverMatchSession converts a still-attached in-match session into a
+// reconnect hold because its owner is asking to re-login from a new socket.
+//
+// LIVE 2026-09-18: a phone's network dropped silently (no RST on the GS
+// socket). The server kept the old socket ESTABLISHED for minutes (30 B
+// frames never fill the send buffer, so the 2 s write deadline never fires),
+// no hold existed, and every ReLoginReq from the new socket died with
+// "no-hold". The ReLoginReq itself is the proof the old transport is dead:
+// the newest connection wins. Returns the stale transports so the caller can
+// mark and close them; they must NOT run the disconnect path (that would
+// clear the hold that was just created).
+func TakeoverMatchSession(roomName, guid string, now time.Time, ttl time.Duration) (*Session, []net.Conn, bool) {
+	if roomName == "" || guid == "" || ttl <= 0 {
+		return nil, nil, false
+	}
+	var roomID int
+	if _, err := fmt.Sscanf(roomName, "hoc_r%d", &roomID); err != nil || roomID <= 0 {
+		return nil, nil, false
+	}
+	room := GetRoom(roomID)
+	if room == nil {
+		return nil, nil, false
+	}
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	if room.State != "match" || !room.MatchClockArmed {
+		return nil, nil, false
+	}
+	for _, s := range room.Members {
+		if s == nil {
+			continue
+		}
+		s.mu.Lock()
+		live := s.GUID == guid && s.Room == room && !s.MatchHold &&
+			(s.MatchPlaying || s.MatchAwaitResumePing) && s.SeatHeroID > 0 && len(s.GSConns) > 0
+		if !live {
+			s.mu.Unlock()
+			continue
+		}
+		stale := append([]net.Conn(nil), s.GSConns...)
+		s.GSConns = nil
+		s.matchResumePending = nil
+		s.matchHoldGeneration++
+		generation := s.matchHoldGeneration
+		s.MatchHold = true
+		s.MatchHoldUntil = now.Add(ttl)
+		s.MatchHoldRoomID = room.ID
+		s.MatchHoldSeat = s.Seat
+		s.MatchHoldHero = s.SeatHeroID
+		s.MatchResumeGraceUntil = time.Time{}
+		s.MatchAwaitResumePing = false
+		s.MatchPlaying = false
+		s.MatchLoading = false
+		s.AwaitingGS = true
+		s.mu.Unlock()
+		time.AfterFunc(ttl, func() { expireMatchHold(s, generation) })
+		return s, stale, true
+	}
+	return nil, nil, false
 }
 
 func (s *Session) CompleteMatchResume(conn net.Conn) bool {
@@ -896,6 +966,7 @@ func (s *Session) NoteSoftResumeEOF() int {
 	}
 	s.SoftResumeFails++
 	s.softResumeAt = time.Time{}
+	s.softFailAt = time.Now()
 	return s.SoftResumeFails
 }
 
@@ -906,6 +977,49 @@ func (s *Session) SoftResumeFailCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.SoftResumeFails
+}
+
+// SoftResumeRefuse reports whether a ReLoginReq must be refused because the
+// client is in an Ack→quick-EOF loop: failMax fails reached AND the last fail
+// is younger than cooldown. Once the client slows down (cooldown elapsed) the
+// counter resets and the next attempt gets a real Ack again — the seat is
+// kept for the hold TTL, never dropped by the refusal itself (LIVE
+// 2026-09-18: refusal dropped the seat 4 s into a 90 s hold while the client
+// went on retrying calmly for 50 s, every attempt dying with no-hold).
+func (s *Session) SoftResumeRefuse(now time.Time, failMax int, cooldown time.Duration) bool {
+	if s == nil || failMax <= 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.SoftResumeFails < failMax {
+		return false
+	}
+	if cooldown > 0 && !s.softFailAt.IsZero() && now.Sub(s.softFailAt) >= cooldown {
+		s.SoftResumeFails = 0
+		s.softFailAt = time.Time{}
+		return false
+	}
+	return true
+}
+
+// AbandonMatchResume detaches a ReLoginReq transport that was claimed by
+// ClaimMatchHold but then refused before any Ack, leaving the hold itself
+// intact (seat, TTL, generation). The caller must not run the disconnect
+// path for that conn afterwards.
+func (s *Session) AbandonMatchResume(c net.Conn) {
+	if s == nil || c == nil {
+		return
+	}
+	s.mu.Lock()
+	s.detachGSLocked(c)
+	if s.matchResumePending == c {
+		s.matchResumePending = nil
+	}
+	if s.MatchHold && len(s.GSConns) == 0 {
+		s.AwaitingGS = true
+	}
+	s.mu.Unlock()
 }
 
 func (s *Session) ResetSoftResumeFails() {

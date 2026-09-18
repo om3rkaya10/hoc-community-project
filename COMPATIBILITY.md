@@ -33,6 +33,7 @@ A device report should include:
 | Match loading stops at 72.5 % and the game closes | client build older than 0.3.2 on Android 15/16; update the APK |
 | Game closes when tapping a tablet card in the lobby | client build older than 0.3.3; update the APK |
 | Tablet shows as locked / "ascended" without having been ascended; "purchase successful" but no tablet delivered | server older than v0.1.9 (ascension and tablet copies) |
+| Dropped out of a match (network hand-off) and could not get back in; teammates saw the player leave within seconds; "Synchronizing" then thrown out again | server older than v0.1.10 (silent-drop takeover, seat kept during the flap guard, solo matches rejoinable, no clock rewind over the replay) |
 | Tablet cannot be ascended | both energy bars must be full; ascension is done from EDIT TABLET → SAVE, not from the equip drawer |
 
 ## Reporting rule

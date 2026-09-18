@@ -108,6 +108,12 @@ type Account struct {
 	Friends        []string           `json:"friends,omitempty"`
 	FriendRequests []FriendRequestRec `json:"friend_requests,omitempty"`
 	IconSign       string             `json:"icon_sign,omitempty"`
+	// SummonerSpells is the last valid pair the client reported in a 0x100C
+	// SkillAck. The original service seeded the match-setup PlayerInfo from
+	// the profile; without it a fresh client sends 0/0 until the player opens
+	// the spell picker and the match then rolls random spells (LIVE journal
+	// 2026-09-18: 195 of ~400 SkillAcks carried 0/0, 8 matches started so).
+	SummonerSpells []int `json:"summoner_spells,omitempty"`
 }
 
 type storeFile struct {
@@ -1629,4 +1635,33 @@ func (a *Account) ApplyTalentUpdate(groupID int, incoming [][]int, reset bool) (
 		selected = out[groupID]
 	})
 	return out, selected
+}
+
+// SetSummonerSpells remembers the pair the client reported (both non-zero).
+func (a *Account) SetSummonerSpells(s1, s2 int) {
+	if a == nil || s1 <= 0 || s2 <= 0 {
+		return
+	}
+	mu.RLock()
+	same := len(a.SummonerSpells) == 2 && a.SummonerSpells[0] == s1 && a.SummonerSpells[1] == s2
+	mu.RUnlock()
+	if same {
+		return
+	}
+	persistMutation(a, func() {
+		a.SummonerSpells = []int{s1, s2}
+	})
+}
+
+// SummonerSpellPair returns the remembered pair, or ok=false when none.
+func (a *Account) SummonerSpellPair() (s1, s2 int, ok bool) {
+	if a == nil {
+		return 0, 0, false
+	}
+	mu.RLock()
+	defer mu.RUnlock()
+	if len(a.SummonerSpells) != 2 || a.SummonerSpells[0] <= 0 || a.SummonerSpells[1] <= 0 {
+		return 0, 0, false
+	}
+	return a.SummonerSpells[0], a.SummonerSpells[1], true
 }

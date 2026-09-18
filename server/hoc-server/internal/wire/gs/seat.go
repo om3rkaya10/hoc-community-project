@@ -165,8 +165,13 @@ func ParseReadyFromSkill(body []byte) (ready int, ok bool) {
 	return 0, false
 }
 
+// spellPairOK — both ids present. The lower bound used to be 100, which
+// rejected the level-1 Heal (34) the client reports by default together with
+// the level-1 Mana Regen (593); the pair was then dropped, the seat kept
+// 0/0 and LoadMap sent 0/0 → the match rolled random spells (LIVE journal
+// 2026-09-18, confirmed on Nox 2026-09-19 with raw 34/593 in the SkillAck).
 func spellPairOK(a, b int) bool {
-	return a >= 100 && a <= 0x10000 && b >= 100 && b <= 0x10000
+	return a >= 1 && a <= 0x10000 && b >= 1 && b <= 0x10000
 }
 
 func skillBodyAfterUTFs(body []byte) (off int, guid, nick string) {

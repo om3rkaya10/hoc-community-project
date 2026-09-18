@@ -173,6 +173,26 @@ var (
 	MatchReconnectHold    = envBool("HOC_MATCH_RECONNECT_HOLD", true)
 	MatchReconnectHoldTTL = envSeconds("HOC_MATCH_RECONNECT_HOLD_TTL_SEC", 90*time.Second)
 	MatchReloginFailMax   = envInt("HOC_MATCH_RELOGIN_FAIL_MAX", 2)
+	// MatchReloginFailCooldown — after MatchReloginFailMax Ack→quick-EOF
+	// cycles the next ReLoginReq is refused (no Ack) only while the last fail
+	// is younger than this; once the client slows down the counter resets and
+	// it gets a real Ack again. The seat is kept for the hold TTL either way
+	// (LIVE 2026-09-18: refusal used to drop the seat 4 s into a 90 s hold).
+	MatchReloginFailCooldown = envSeconds("HOC_MATCH_RELOGIN_FAIL_COOLDOWN_SEC", 5*time.Second)
+	// DefaultSummonerSpells is used for a match-setup PlayerInfo whose SkillAck
+	// carries 0/0 and whose account has no remembered pair yet (first match
+	// of a fresh account): level-1 Heal (34) and level-1 Mana Regen (593),
+	// the pair the client itself reports before the player touches the
+	// picker (operator decision 2026-09-19).
+	DefaultSummonerSpell1 = envInt("HOC_DEFAULT_SUMMONER_SPELL1", 34)
+	DefaultSummonerSpell2 = envInt("HOC_DEFAULT_SUMMONER_SPELL2", 593)
+	// GSUserTimeout — Linux TCP_USER_TIMEOUT on GS sockets: unacked data
+	// older than this aborts the connection, so a phone that vanished without
+	// RST (Wi-Fi→4G, signal loss) surfaces as EOF in seconds instead of the
+	// ~15 min retransmit ceiling. 30 B frames never fill the send buffer, so
+	// the 2 s write deadline alone never fires for a silent peer. Keepalive
+	// (same period) covers the idle direction. 0 disables both.
+	GSUserTimeout = envSeconds("HOC_GS_USER_TIMEOUT_SEC", 10*time.Second)
 	// Stall freeze disabled (0): any positive value paused op7/op11 for the
 	// whole room and destroyed movement. Do not re-enable without a per-peer
 	// skip (not room-wide freeze).
