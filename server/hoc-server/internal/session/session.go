@@ -25,6 +25,10 @@ type Session struct {
 	Account  *accounts.Account
 	Token    string
 	GUID     string
+	// ClientBuild is the build string the client reports (custom_<build>
+	// room attribute in the lobby, UTF field in the GS LoginReq). Stock is
+	// "3.5.2a"; the 60 Hz APK reports config.Build60Hz.
+	ClientBuild string
 
 	RoomID           int
 	TskCID           int
@@ -119,6 +123,12 @@ type Room struct {
 	// instead of carrying the client's values and -1 "map default" sentinels.
 	CustomOpts config.CustomRoomOptions
 
+	// Build is the host client's build string ("3.5.2a" stock, Build60Hz for
+	// the 60 Hz APK); FramePeriod is the op11 tick derived from it. Searches
+	// and joins are filtered on Build so the two lockstep rates never mix.
+	Build       string
+	FramePeriod time.Duration
+
 	MatchClockArmed bool
 	MatchSFrame     int
 	MatchSynNext    int
@@ -193,6 +203,7 @@ type RoomOptions struct {
 	Flag1013  byte
 	Param103E int32
 	JSON1014  []byte
+	Build     string // client build from the custom_<build> room attribute
 }
 
 // RoomLeaveEvent is emitted while the old room/seat links are still intact.
@@ -226,6 +237,7 @@ type RoomSnapshot struct {
 	Str1040   string
 	Int1041   int32
 	Str104B   string
+	Build     string
 }
 
 type MatchHoldClaim struct {
@@ -587,6 +599,23 @@ func (s *Session) MarkGSLeave() {
 	s.MatchLoading = false
 	s.MatchPlaying = false
 	s.mu.Unlock()
+}
+
+// SetClientBuild records the reported build; empty values never overwrite
+// a known one (the lobby search may be sent without the attribute).
+func (s *Session) SetClientBuild(build string) {
+	if build == "" {
+		return
+	}
+	s.mu.Lock()
+	s.ClientBuild = build
+	s.mu.Unlock()
+}
+
+func (s *Session) GetClientBuild() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ClientBuild
 }
 
 func (s *Session) IsMatchPlaying() bool {
@@ -1161,20 +1190,22 @@ func CreateRoom(host *Session, opts RoomOptions) *Room {
 	id := nextRoom
 	nextRoom++
 	r := &Room{
-		ID:         id,
-		Name:       opts.Name,
-		Host:       host,
-		Members:    []*Session{host},
-		Capacity:   opts.Capacity,
-		State:      "open",
-		CreatedAt:  time.Now(),
-		Flag1012:   opts.Flag1012,
-		Flag1013:   opts.Flag1013,
-		Param103E:  opts.Param103E,
-		JSON1014:   json1014,
-		MapName:    mapName,
-		CustomOpts: customOpts,
-		TskCID:     config.DefaultTskCID,
+		ID:          id,
+		Name:        opts.Name,
+		Host:        host,
+		Members:     []*Session{host},
+		Capacity:    opts.Capacity,
+		State:       "open",
+		CreatedAt:   time.Now(),
+		Flag1012:    opts.Flag1012,
+		Flag1013:    opts.Flag1013,
+		Param103E:   opts.Param103E,
+		JSON1014:    json1014,
+		Build:       opts.Build,
+		FramePeriod: config.FramePeriodForBuild(opts.Build),
+		MapName:     mapName,
+		CustomOpts:  customOpts,
+		TskCID:      config.DefaultTskCID,
 	}
 	rooms[id] = r
 	host.mu.Lock()
@@ -1187,6 +1218,24 @@ func CreateRoom(host *Session, opts RoomOptions) *Room {
 	resetSeatSelectionLocked(host)
 	host.mu.Unlock()
 	return r
+}
+
+// TickPeriod is the room's op11 period: the host build's rate, or the
+// server default for rooms created without a build (tests, legacy).
+func (r *Room) TickPeriod() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.FramePeriod > 0 {
+		return r.FramePeriod
+	}
+	return config.FramePeriod
+}
+
+// BuildString returns the host client's build the room was created with.
+func (r *Room) BuildString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Build
 }
 
 func (r *Room) Lock()   { r.mu.Lock() }
@@ -1215,6 +1264,7 @@ func ListOpenRooms() []RoomSnapshot {
 				Flag1012: room.Flag1012, Flag1013: room.Flag1013, Param103E: room.Param103E,
 				Flag1011: room.Flag1011, JSON1014: append([]byte(nil), room.JSON1014...),
 				Str1040: room.Str1040, Int1041: room.Int1041, Str104B: room.Str104B,
+				Build: room.Build,
 			})
 		}
 		room.mu.Unlock()

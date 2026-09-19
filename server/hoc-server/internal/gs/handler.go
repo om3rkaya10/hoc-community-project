@@ -15,6 +15,7 @@ import (
 	"hoc-server/internal/gs/trade"
 	"hoc-server/internal/match"
 	"hoc-server/internal/netx"
+	"hoc-server/internal/prof"
 	"hoc-server/internal/session"
 	wiregs "hoc-server/internal/wire/gs"
 )
@@ -66,9 +67,10 @@ func Init() {
 		// that stopped reading would otherwise stall the whole room's frame
 		// clock (AGENTS5 §2.6).
 		netx.ApplyMatchWriteDeadline(conn)
-		_, _ = conn.Write(pkt)
+		_, err := conn.Write(pkt)
 		netx.ClearMatchWriteDeadline(conn)
 		st.mu.Unlock()
+		prof.WriteErr(err)
 	})
 }
 
@@ -155,7 +157,7 @@ func Handle(conn net.Conn) {
 	buf := make([]byte, 0, 16384)
 	tmp := make([]byte, 8192)
 	ackSent := false
-	framePeriod := time.Second / time.Duration(config.FrameHZ)
+	framePeriod := config.FramePeriod
 
 	for {
 		// With the dedicated room ticker the frame clock no longer rides on
@@ -164,6 +166,9 @@ func Handle(conn net.Conn) {
 		deadline := 120 * time.Millisecond
 		if st.playing && config.FrameClock && !config.FrameTicker {
 			deadline = framePeriod
+			if st.sess != nil && st.sess.Room != nil {
+				deadline = st.sess.Room.TickPeriod()
+			}
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(deadline))
 		n, err := conn.Read(tmp)
@@ -400,10 +405,26 @@ func replayMatchResume(conn net.Conn, st *connState) bool {
 }
 
 func handleLogin(conn net.Conn, st *connState, seq uint16, payload []byte) {
+	if prof.Enabled() {
+		// Lag-hunt / client-marker RE aid: the raw LoginReq body once per
+		// connection (profiling builds only).
+		fmt.Printf(" [GS] LoginReq raw %dB hex=%x\n", len(payload), payload)
+	}
 	user, token := wiregs.ParseLoginIdentity(payload)
+	build := wiregs.ParseLoginBuild(payload)
 	sess, how := session.ResolveGS(token, user)
 	custom := false
 	if sess != nil {
+		sess.SetClientBuild(build)
+		// Lockstep rate gate (belt and braces after the lobby filter): the
+		// room clock runs at the host build's period; a client of the other
+		// class would run the match at 2x/0.5x speed for everyone.
+		if room := sess.Room; room != nil && !config.SameBuildClass(room.BuildString(), sess.GetClientBuild()) {
+			fmt.Printf(" [GS] LoginReq REFUSED user=%q build=%q room build=%q (lockstep rate mismatch)\n",
+				sess.Username, sess.GetClientBuild(), room.BuildString())
+			_ = conn.Close()
+			return
+		}
 		sess.AttachGS(conn)
 		st.sess = sess
 		st.roomID = sess.RoomID
@@ -428,7 +449,7 @@ func handleLogin(conn net.Conn, st *connState, seq uint16, payload []byte) {
 		}
 		st.custom = custom
 	}
-	fmt.Printf(" [GS] LoginReq resolve=%s user=%q token=%q custom=%v\n", how, user, token, custom)
+	fmt.Printf(" [GS] LoginReq resolve=%s user=%q token=%q build=%q custom=%v\n", how, user, token, build, custom)
 
 	ackSeq := int32(seq) + 1
 	ack := wiregs.LoginAck(st.roomID, st.tskcid)
@@ -893,6 +914,7 @@ func broadcastSharedLoadMap(room *session.Room, reason string) {
 }
 
 func handleUnitAction(conn net.Conn, st *connState, slot byte, sub uint16, act []byte) {
+	t0 := time.Now() // prof: recv → last peer write
 	room := (*session.Room)(nil)
 	if st.sess != nil {
 		room = st.sess.Room
@@ -935,7 +957,9 @@ func handleUnitAction(conn net.Conn, st *connState, slot byte, sub uint16, act [
 	sframe := room.MatchSFrame
 	// Take the wire lock before releasing the state lock so op7 keeps its slot
 	// in wire order (hand-over-hand); never acquire mu while holding wireMu.
+	tw := time.Now()
 	room.WireLock()
+	wireWait := time.Since(tw)
 	room.Unlock()
 	defer room.WireUnlock()
 
@@ -959,14 +983,20 @@ func handleUnitAction(conn net.Conn, st *connState, slot byte, sub uint16, act [
 			s2 := st2.seq
 			st2.seq++
 			netx.ApplyMatchWriteDeadline(gc)
-			_, _ = gc.Write(wiregs.BuildInMatch(s2, 7, sub, stamped, slot))
+			_, err := gc.Write(wiregs.BuildInMatch(s2, 7, sub, stamped, slot))
 			netx.ClearMatchWriteDeadline(gc)
 			st2.mu.Unlock()
+			prof.WriteErr(err)
 			peerSends++
 		}
 	}
+	relayed := time.Since(t0)
+	tl := time.Now()
 	fmt.Printf(" [MATCH] op7 RELAY sub=%#x slot=%d frame[0]=%d(was %d,sframe=%d) syn[1]=%d(was %d) peers=%d\n",
 		sub, slot, frameAt, oldFrame, sframe, synUsed, oldSyn, peerSends)
+	if prof.Enabled() {
+		prof.Op7Relay(relayed, wireWait, time.Since(tl), peerSends)
+	}
 }
 
 func sendSyn(conn net.Conn, st *connState, sub uint16, body []byte) {

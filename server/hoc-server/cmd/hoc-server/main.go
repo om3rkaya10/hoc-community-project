@@ -13,6 +13,7 @@ import (
 	"hoc-server/internal/edge"
 	"hoc-server/internal/gs"
 	"hoc-server/internal/lobby"
+	"hoc-server/internal/prof"
 )
 
 func main() {
@@ -35,6 +36,7 @@ func main() {
 		log.Fatalf("accounts: %v", err)
 	}
 	crt, key := config.CertPaths()
+	prof.Start()
 
 	go must(func() error { return edge.ListenHTTP(":80") })
 	go must(func() error { return edge.ListenHTTP(":20001") }) // eve HTTP dump + discovery

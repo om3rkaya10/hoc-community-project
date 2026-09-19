@@ -14,7 +14,11 @@ Use server tags in this form:
 server-vMAJOR.MINOR.PATCH
 ```
 
-The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, `server-v0.1.7`, `server-v0.1.8`, `server-v0.1.9`, and `server-v0.1.10`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+The current releases are `server-v0.1.0`, `server-v0.1.1`, `server-v0.1.2`, `server-v0.1.3`, `server-v0.1.4`, `server-v0.1.5`, `server-v0.1.6`, `server-v0.1.7`, `server-v0.1.8`, `server-v0.1.9`, `server-v0.1.10`, and `server-v0.1.11`. A release should record its date, source commit, compatibility expectations, known issues, rollback notes, test result, and checksums.
+
+### server-v0.1.11
+
+`server-v0.1.11` makes the lockstep frame rate a per-room property derived from the client build the room was created with, so a 60 fps client can be introduced later without changing anything for players on the current client. The original client already reports its build (`3.5.2a`, from `[App] Version` in the downloaded `game_Android.conf`) in the game-server `LoginReq` and as the `custom_<build>` attribute of every custom-room create and search; the server now keeps that build on the room, filters room searches to the searcher's class, refuses joins and game-server logins that would mix classes, and ticks each room at its class's period (30 Hz for `3.5.2a` and unknown builds — identical to `server-v0.1.10` — and `HOC_FRAME_MS_60HZ`, 16 ms, for the build named by `HOC_BUILD_60HZ`, default `3.5.2b`). It also adds the opt-in match-lag profiler (`HOC_PROFILE`, `HOC_PPROF_ADDR`) used for the 2026-09-19 public-server measurement. Account store unchanged; readable by `server-v0.1.10`; no client update required; rollback is the `server-v0.1.10` binary. Validated against a local build with a stock 32-bit client and a 60 Hz arm64 build on two emulators: neither could see or join the other's room, and two matches ran side by side at 33.3 ms and 16 ms (925 ticks per 10 s, p95 within 30 µs of target); the profiler validated on the public server with a live 3v3 and `tc netem` (see `VALIDATION.md`).
 
 ### server-v0.1.10
 

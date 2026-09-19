@@ -9,6 +9,7 @@ import (
 
 	"hoc-server/internal/accounts"
 	"hoc-server/internal/config"
+	"hoc-server/internal/prof"
 	"hoc-server/internal/session"
 	"hoc-server/internal/wire/glblock"
 )
@@ -68,6 +69,14 @@ func Handle(conn net.Conn, addr string) {
 }
 
 func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt []byte) {
+	if prof.Enabled() {
+		// RE aid (profiling builds only): every glblock child of a C2S lobby
+		// packet, so new fields (client build marker etc.) can be located.
+		for _, c := range glblock.IterChildren(pkt) {
+			fmt.Printf(" [LOBBY#%d RAW] op=%#x child=%#x type=%d len=%d val=%q\n",
+				peer, op, c.TypeID, c.Type, len(c.Value), c.Value)
+		}
+	}
 	switch op {
 	case 0x1601:
 		acc := sess.Account
@@ -178,7 +187,8 @@ func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt
 
 	case 0xe03a:
 		sess.CustomRoomIntent = true
-		rooms := searchCustomRooms()
+		sess.SetClientBuild(glblock.RoomBuildAttr(pkt))
+		rooms := searchCustomRooms(sess.GetClientBuild())
 		roomIDs := make([]int, 0, len(rooms))
 		for _, room := range rooms {
 			roomIDs = append(roomIDs, int(room.ID))
@@ -194,8 +204,10 @@ func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt
 	case 0xe038:
 		sess.CustomRoomIntent = true
 		sess.ClearCustomRoomSearch()
+		sess.SetClientBuild(glblock.RoomBuildAttr(pkt))
 		opts := session.RoomOptions{
 			Name: "room", Capacity: 10, Flag1012: 1, Flag1013: 0, JSON1014: []byte("{}"),
+			Build: sess.GetClientBuild(),
 		}
 		for _, c := range glblock.IterChildren(pkt) {
 			switch {
@@ -219,7 +231,7 @@ func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt
 		roomName := []byte(room.Name)
 		rep := glblock.CreateCustomReply(int32(room.ID), roomName)
 		_, _ = conn.Write(rep)
-		fmt.Printf(" [LOBBY#%d SENT] 0xe039 room_id=%d\n", peer, room.ID)
+		fmt.Printf(" [LOBBY#%d SENT] 0xe039 room_id=%d build=%q tick=%s\n", peer, room.ID, room.Build, room.FramePeriod)
 		if config.PushHostUserList && sess.Account != nil {
 			nick := accountNick(sess.Account)
 			uid := accountWireID(sess.Account)
@@ -252,6 +264,15 @@ func handleOpcode(conn net.Conn, sess *session.Session, peer int, op uint16, pkt
 		resolvedRoomID, correlated := sess.CorrelateCustomRoomJoin(requestedRoomID)
 		if correlated {
 			fmt.Printf(" [LOBBY#%d] e03c room_id=0 correlated advertised_room=%d\n", peer, resolvedRoomID)
+		}
+		// Lockstep rate gate: a stock (33 ms) client must never share a
+		// match with a 60 Hz one. The search already hides foreign rooms;
+		// this covers a stale room id.
+		if target := session.GetRoom(resolvedRoomID); target != nil &&
+			!config.SameBuildClass(target.BuildString(), sess.GetClientBuild()) {
+			fmt.Printf(" [LOBBY#%d] e03c join REFUSED room=%d build=%q client=%q (lockstep rate mismatch)\n",
+				peer, resolvedRoomID, target.BuildString(), sess.GetClientBuild())
+			return
 		}
 		room, why := session.JoinRoom(sess, resolvedRoomID, reqSeat)
 		if room == nil {
@@ -322,10 +343,16 @@ func lobbyUsers(room *session.Room) []glblock.LobbyUser {
 	return out
 }
 
-func searchCustomRooms() []glblock.CustomRoom {
+// searchCustomRooms lists open rooms of the searcher's lockstep class only
+// (stock 33 ms vs 60 Hz), which is what the client's own custom_<build>
+// attribute asked the original servers for.
+func searchCustomRooms(build string) []glblock.CustomRoom {
 	snapshots := session.ListOpenRooms()
 	rooms := make([]glblock.CustomRoom, 0, len(snapshots))
 	for _, room := range snapshots {
+		if !config.SameBuildClass(room.Build, build) {
+			continue
+		}
 		rooms = append(rooms, glblock.CustomRoom{
 			ID: int32(room.ID), Name: []byte(room.Name),
 			Flag1012: room.Flag1012, Flag1013: room.Flag1013,

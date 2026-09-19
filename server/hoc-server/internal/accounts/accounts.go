@@ -15,6 +15,7 @@ import (
 
 	"hoc-server/internal/config"
 	"hoc-server/internal/domain/items"
+	"hoc-server/internal/prof"
 )
 
 const (
@@ -278,12 +279,15 @@ func saveLocked() error {
 	if loadPath == "" {
 		return fmt.Errorf("accounts: no load path")
 	}
+	t0 := time.Now()
 	f := storeFile{Accounts: byUN}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(loadPath, b, 0o644)
+	err = os.WriteFile(loadPath, b, 0o644)
+	prof.Save(time.Since(t0), len(b))
+	return err
 }
 
 func Save() error {

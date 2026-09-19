@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hoc-server/internal/config"
+	"hoc-server/internal/prof"
 	"hoc-server/internal/session"
 	wiregs "hoc-server/internal/wire/gs"
 )
@@ -94,9 +95,9 @@ func (c *Clock) startTicker(room *session.Room) {
 	c.tickers[room] = rt
 	c.mu.Unlock()
 
-	period := time.Second / time.Duration(config.FrameHZ)
-	fmt.Printf(" [MATCH] op11 clock ARMED hz=%d period=%s (dedicated room ticker)\n",
-		config.FrameHZ, period)
+	period := room.TickPeriod()
+	fmt.Printf(" [MATCH] op11 clock ARMED period=%s build=%q (dedicated room ticker)\n",
+		period, room.BuildString())
 
 	go func() {
 		defer close(rt.done)
@@ -358,10 +359,12 @@ func (c *Clock) sendFrames(room *session.Room, n int, tag string) {
 	type frameSend struct {
 		conn net.Conn
 		body []byte
+		user string
 	}
 	var sends []frameSend
 	var f0, f1, syn0, syn1, total, alive int
 	held := false
+	var wireWait time.Duration
 
 	func() {
 		room.Lock()
@@ -422,7 +425,7 @@ func (c *Clock) sendFrames(room *session.Room, n int, tag string) {
 					continue
 				}
 				for _, gc := range dest.SnapshotGSConns() {
-					sends = append(sends, frameSend{conn: gc, body: body})
+					sends = append(sends, frameSend{conn: gc, body: body, user: dest.Username})
 				}
 			}
 		}
@@ -430,7 +433,9 @@ func (c *Clock) sendFrames(room *session.Room, n int, tag string) {
 			// Hand-over-hand: claim the wire slot BEFORE releasing state, so an
 			// op7 relay cannot slip its packet ahead of the frame we just
 			// numbered (sequenceID wrong -> Dev|3004, AGENTS4 §11.7).
+			t := time.Now()
 			room.WireLock()
+			wireWait = time.Since(t)
 			held = true
 			room.Unlock()
 		}
@@ -439,10 +444,27 @@ func (c *Clock) sendFrames(room *session.Room, n int, tag string) {
 	if len(sends) == 0 {
 		return
 	}
-	for _, s := range sends {
-		c.send(s.conn, 11, 0, s.body, true)
+	if prof.Enabled() {
+		// Lag hunt: time every socket write so a congested peer shows up by
+		// name instead of as unexplained tick jitter.
+		t0 := time.Now()
+		var slow time.Duration
+		slowUser := ""
+		for _, s := range sends {
+			t := time.Now()
+			c.send(s.conn, 11, 0, s.body, true)
+			if d := time.Since(t); d > slow {
+				slow, slowUser = d, s.user
+			}
+		}
+		room.WireUnlock()
+		prof.FrameSend(time.Since(t0), len(sends), slow, slowUser, wireWait)
+	} else {
+		for _, s := range sends {
+			c.send(s.conn, 11, 0, s.body, true)
+		}
+		room.WireUnlock()
 	}
-	room.WireUnlock()
 	if tag != "" || total <= config.FrameHZ || total%config.FrameHZ == 0 {
 		fmt.Printf(" [MATCH] op11 SHARED x%d frames=%d..%d syn=%d..%d total=%d members=%d %s\n",
 			n, f0, f1, syn0, syn1, total, alive, tag)

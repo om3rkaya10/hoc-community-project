@@ -34,6 +34,7 @@ A device report should include:
 | Game closes when tapping a tablet card in the lobby | client build older than 0.3.3; update the APK |
 | Tablet shows as locked / "ascended" without having been ascended; "purchase successful" but no tablet delivered | server older than v0.1.9 (ascension and tablet copies) |
 | Dropped out of a match (network hand-off) and could not get back in; teammates saw the player leave within seconds; "Synchronizing" then thrown out again | server older than v0.1.10 (silent-drop takeover, seat kept during the flap guard, solo matches rejoinable, no clock rewind over the replay) |
+| A room a friend created is not in the room list, or joining it is refused | the two clients are on different lockstep builds (current client vs. 60 fps client); both must run the same client build to share a match |
 | Tablet cannot be ascended | both energy bars must be full; ascension is done from EDIT TABLET → SAVE, not from the equip drawer |
 
 ## Reporting rule

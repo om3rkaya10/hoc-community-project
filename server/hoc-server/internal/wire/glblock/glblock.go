@@ -1,6 +1,7 @@
 package glblock
 
 import (
+	"bytes"
 	"encoding/binary"
 )
 
@@ -127,6 +128,25 @@ func TeamPlayGameInfo(token []byte, roomID int32, gsIP string, gsPort uint16) []
 		{0x102C, TypeShort, ShortBE(gsPort)},
 		{0x0402, TypeString, append([]byte(nil), token...)},
 	})
+}
+
+// RoomBuildAttr extracts the client build from the custom_<build> room
+// attribute the client puts in e038 (create, child 0x1017) and e03a (search,
+// child 0x1019). The attribute block is nested; the string is located by
+// prefix and ends at the first non-printable byte.
+func RoomBuildAttr(pkt []byte) string {
+	for _, c := range IterChildren(pkt) {
+		if i := bytes.Index(c.Value, []byte("custom_")); i >= 0 {
+			j := i + len("custom_")
+			for j < len(c.Value) && c.Value[j] > 0x20 && c.Value[j] < 0x7f {
+				j++
+			}
+			if j > i+len("custom_") {
+				return string(c.Value[i+len("custom_") : j])
+			}
+		}
+	}
+	return ""
 }
 
 func Empty(opcode uint16) []byte {

@@ -1,6 +1,7 @@
 package gs
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"hoc-server/internal/config"
@@ -685,6 +686,38 @@ func ParseLoginIdentity(payload []byte) (user, token string) {
 		}
 	}
 	return
+}
+
+// ParseLoginBuild returns the client build string from a LoginReq body.
+// CGameSession::SendLogonGS writes, after the token: WriteShort, then
+// WriteUTF(GetSimpleGameBuildVersion()) ("3.5.2a" from game_Android.conf
+// [App] Version, or config.Build60Hz in the 60 Hz APK), then
+// WriteUTF(room name "hoc_r<N>"). UTF fields are u16-LE length prefixed, so
+// the build is the length-prefixed string that ends right before the room
+// field.
+func ParseLoginBuild(payload []byte) string {
+	i := bytes.Index(payload, []byte("hoc_r"))
+	if i < 2 {
+		return ""
+	}
+	end := i - 2 // room length prefix starts here; build bytes end here
+	for n := 1; n <= 32 && end-n-2 >= 0; n++ {
+		if int(binary.LittleEndian.Uint16(payload[end-n-2:end-n])) != n {
+			continue
+		}
+		b := payload[end-n : end]
+		ok := true
+		for _, c := range b {
+			if c <= 0x20 || c >= 0x7f {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return string(b)
+		}
+	}
+	return ""
 }
 
 func asciiAfterPrefix(payload []byte, prefix string) string {

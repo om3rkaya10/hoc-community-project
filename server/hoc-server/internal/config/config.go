@@ -14,7 +14,6 @@ const (
 	DefaultRoomID = 1
 	DefaultTskCID = 2
 	GSPort        = 9999
-	FrameHZ       = 30
 	FrameLead     = 1
 	GSIGameMode   = 4
 	GSIModeParam  = 4
@@ -231,7 +230,64 @@ var (
 	// DefaultMatchWriteTimeout for the rationale. HOC_MATCH_WRITE_TIMEOUT_MS=0
 	// disables it and restores the pre-2026-08-16 unbounded behaviour.
 	MatchWriteTimeout = envDuration("HOC_MATCH_WRITE_TIMEOUT_MS", DefaultMatchWriteTimeout)
+
+	// FrameHZ / FramePeriod — the op11 lockstep rate. LIVE is 30 Hz: the
+	// client pushes a hard-coded 33 ms dt per received frame
+	// (NGDataPtl::HandleGamePlayFrame, `mov r8,#0x21` @0x12a1bf4), so any
+	// other rate needs a client whose dt constant matches the period.
+	//
+	// HOC_FRAME_MS=16 sets the period directly (60 Hz experiment, pairs with
+	// tools/patch_frame_dt.py --ms 16); HOC_FRAME_HZ=60 is the same thing
+	// rounded to a whole rate. Unset = exactly the old time.Second/30.
+	FrameHZ, FramePeriod = frameRate()
+
+	// Build60Hz / FramePeriod60Hz — the 60 Hz lockstep client. The client
+	// reports its build string in the GS LoginReq and tags every custom room
+	// it creates or searches with the attribute custom_<build> (Gameloft's
+	// own version matchmaking, which this server used to ignore). The 60 Hz
+	// APK returns Build60Hz from GetSimpleGameBuildVersion, so its rooms
+	// only ever meet other 60 Hz clients and run at FramePeriod60Hz; stock
+	// clients ("3.5.2a") keep FramePeriod. Never put both in one match.
+	Build60Hz       = envString("HOC_BUILD_60HZ", "3.5.2b")
+	FramePeriod60Hz = envDurationMS("HOC_FRAME_MS_60HZ", 16*time.Millisecond)
+
+	// Profile — HOC_PROFILE=true turns on the lag-hunt instrumentation in
+	// internal/prof (per-tick write timing, op7 relay latency, GC/CPU) as one
+	// log block per 10 s. Off by default: it costs a time.Now() pair per
+	// socket write.
+	Profile = envBool("HOC_PROFILE", false)
+
+	// PprofAddr — HOC_PPROF_ADDR=127.0.0.1:6060 serves net/http/pprof for the
+	// profiling rig. Loopback only; prof.Start refuses anything else.
+	PprofAddr = envString("HOC_PPROF_ADDR", "")
 )
+
+// FramePeriodForBuild picks the room tick for a client build string.
+func FramePeriodForBuild(build string) time.Duration {
+	if build != "" && build == Build60Hz {
+		return FramePeriod60Hz
+	}
+	return FramePeriod
+}
+
+// SameBuildClass reports whether two client builds may share a match: both
+// unknown/legacy count as stock, and only an exact Build60Hz match is 60 Hz.
+func SameBuildClass(a, b string) bool {
+	return (a == Build60Hz) == (b == Build60Hz)
+}
+
+// frameRate resolves HOC_FRAME_MS / HOC_FRAME_HZ into (rate, period); the
+// rate only drives log cadence, the period drives the room ticker.
+func frameRate() (int, time.Duration) {
+	if ms := envInt("HOC_FRAME_MS", 0); ms > 0 {
+		return int(1000 / ms), time.Duration(ms) * time.Millisecond
+	}
+	hz := envInt("HOC_FRAME_HZ", 30)
+	if hz <= 0 {
+		hz = 30
+	}
+	return hz, time.Second / time.Duration(hz)
+}
 
 // envDuration reads a millisecond count from the environment. A value of 0 is
 // meaningful (feature off), so it is preserved rather than treated as unset.
