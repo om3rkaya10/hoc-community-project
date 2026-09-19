@@ -1,5 +1,11 @@
 # Changelog
 
+## Client — Global Public Beta 0.4 (armeabi-v7a and arm64-v8a) — 2026-09-19
+
+- **60 fps.** The original client caps its render loop at 30 fps and steps the lockstep logic in fixed 33 ms increments: `NGDataPtl::HandleGamePlayFrame` pushes a hard-coded 33 ms dt per received op11 frame, `GS_GamePlay::EstimateExeFrames` paces execution by wall clock in 33 ms units, `NGDataPtl::_btpf` / `g_tartget_fps` and `Game::DoFrame` bound the in-game frame time from below, and on top of all that the Java `GLSurfaceView` thread sleeps to a 30 ms frame budget. The 0.4 build changes every one of those constants to 16 ms (the ×33 / ÷33 arithmetic in the pacer becomes shifts) and the Java budget to 16 ms, and pairs with a server room ticking at 62.5 Hz. Game logic is dt-driven, so the game runs at exactly the same speed (match clock measured 1:1 against wall time); movement, animation and camera render at 60 fps, and the input-latency floor (one frame lead) halves. Verified on Nox: 60 fps median frame time, two-player lockstep with no sequence errors or reconnects, and a 60 Hz arm64 build under a simulated 160 ms RTT with 1 % loss. Frame-counting cosmetics (some particle emitters) look denser.
+- **Build marker.** `GetSimpleGameBuildVersion()` returns the literal `3.5.2b` instead of `[App] Version` from the downloaded `game_Android.conf` (`3.5.2a`). The client already sends that value in the game-server `LoginReq` and as the `custom_<build>` attribute of every custom-room create and search, so `server-v0.1.11` keeps 0.4 and 0.3.x players in separate rooms (a mixed match would run at half or double speed for everyone) and ticks 0.4 rooms at 16 ms. 0.3.x clients are unaffected and keep working; the two versions simply do not see each other's rooms.
+- Native libraries differ from 0.3.3 at 17 words per ABI (the frame constants and the four-word marker stub); `classes.dex` differs only in the `GLSurfaceView` frame-budget field.
+
 ## server-v0.1.11 — 2026-09-19
 
 ### Lockstep rate per room (60 Hz client support), profiling instrumentation
